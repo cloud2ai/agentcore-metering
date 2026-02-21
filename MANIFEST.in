@@ -1,0 +1,6 @@
+include README.md
+include README.zh-CN.md
+include pyproject.toml
+
+recursive-include agentcore_tracking/adapters/django/llm_static *.yaml
+recursive-include agentcore_tracking/adapters/django/locale *.po
