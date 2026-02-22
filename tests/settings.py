@@ -1,5 +1,5 @@
 """
-Minimal Django settings for running agentcore_tracking tests.
+Minimal Django settings for running agentcore_metering tests.
 """
 import os
 
@@ -9,7 +9,7 @@ INSTALLED_APPS = [
     "django.contrib.contenttypes",
     "django.contrib.auth",
     "rest_framework",
-    "agentcore_tracking.adapters.django",
+    "agentcore_metering.adapters.django",
 ]
 DATABASES = {
     "default": {

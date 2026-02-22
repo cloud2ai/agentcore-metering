@@ -5,7 +5,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 from types import SimpleNamespace
 
-from agentcore_tracking.adapters.django import LLMTracker
+from agentcore_metering.adapters.django import LLMTracker
 
 
 @pytest.mark.unit
@@ -32,10 +32,10 @@ class TestCallAndTrackServiceReturnsNone:
     """
 
     @patch(
-        "agentcore_tracking.adapters.django.trackers.llm.litellm"
+        "agentcore_metering.adapters.django.trackers.llm.litellm"
     )
     @patch(
-        "agentcore_tracking.adapters.django.trackers.llm.get_litellm_params"
+        "agentcore_metering.adapters.django.trackers.llm.get_litellm_params"
     )
     def test_completion_returns_none_raises_value_error(
         self, mock_params, mock_litellm
@@ -59,10 +59,10 @@ class TestCallAndTrackEmptyResponse:
     """
 
     @patch(
-        "agentcore_tracking.adapters.django.trackers.llm.litellm"
+        "agentcore_metering.adapters.django.trackers.llm.litellm"
     )
     @patch(
-        "agentcore_tracking.adapters.django.trackers.llm.get_litellm_params"
+        "agentcore_metering.adapters.django.trackers.llm.get_litellm_params"
     )
     def test_empty_response_content_raises_value_error(
         self, mock_params, mock_litellm
@@ -92,13 +92,13 @@ class TestCallAndTrackEmptyResponse:
 @pytest.mark.unit
 class TestCallAndTrackUsageExtraction:
     @patch(
-        "agentcore_tracking.adapters.django.trackers.llm.LLMTracker._save_usage_to_db"
+        "agentcore_metering.adapters.django.trackers.llm.LLMTracker._save_usage_to_db"
     )
     @patch(
-        "agentcore_tracking.adapters.django.trackers.llm.litellm"
+        "agentcore_metering.adapters.django.trackers.llm.litellm"
     )
     @patch(
-        "agentcore_tracking.adapters.django.trackers.llm.get_litellm_params"
+        "agentcore_metering.adapters.django.trackers.llm.get_litellm_params"
     )
     def test_extracts_cached_and_reasoning_tokens_from_nested_usage_details(
         self, mock_params, mock_litellm, mock_save_usage
@@ -134,13 +134,13 @@ class TestCallAndTrackUsageExtraction:
         assert save_kwargs["reasoning_tokens"] == 2
 
     @patch(
-        "agentcore_tracking.adapters.django.trackers.llm.LLMTracker._save_usage_to_db"
+        "agentcore_metering.adapters.django.trackers.llm.LLMTracker._save_usage_to_db"
     )
     @patch(
-        "agentcore_tracking.adapters.django.trackers.llm.litellm"
+        "agentcore_metering.adapters.django.trackers.llm.litellm"
     )
     @patch(
-        "agentcore_tracking.adapters.django.trackers.llm.get_litellm_params"
+        "agentcore_metering.adapters.django.trackers.llm.get_litellm_params"
     )
     def test_invalid_hidden_response_cost_does_not_break_call(
         self, mock_params, mock_litellm, mock_save_usage
@@ -170,10 +170,10 @@ class TestCallAndTrackUsageExtraction:
         assert save_kwargs["cost"] is None
 
     @patch(
-        "agentcore_tracking.adapters.django.trackers.llm.litellm"
+        "agentcore_metering.adapters.django.trackers.llm.litellm"
     )
     @patch(
-        "agentcore_tracking.adapters.django.trackers.llm.get_litellm_params"
+        "agentcore_metering.adapters.django.trackers.llm.get_litellm_params"
     )
     def test_whitespace_only_response_raises_value_error(
         self, mock_params, mock_litellm

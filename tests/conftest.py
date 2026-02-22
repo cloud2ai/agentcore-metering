@@ -1,5 +1,5 @@
 """
-Pytest fixtures for agentcore_tracking tests.
+Pytest fixtures for agentcore_metering tests.
 """
 import os
 

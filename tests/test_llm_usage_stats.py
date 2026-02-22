@@ -6,7 +6,7 @@ from datetime import datetime
 import pytest
 from django.utils import timezone as django_tz
 
-from agentcore_tracking.adapters.django.services.usage_stats import (
+from agentcore_metering.adapters.django.services.usage_stats import (
     _parse_date,
     _parse_end_date,
     get_stats_by_model,
@@ -14,7 +14,7 @@ from agentcore_tracking.adapters.django.services.usage_stats import (
     get_time_series_stats,
     get_token_stats_from_query,
 )
-from agentcore_tracking.adapters.django.models import LLMUsage
+from agentcore_metering.adapters.django.models import LLMUsage
 
 
 @pytest.mark.unit

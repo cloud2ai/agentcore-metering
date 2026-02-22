@@ -1,4 +1,4 @@
-# Agentcore Tracking
+# Agentcore Metering
 
 [English](README.md)
 
@@ -16,11 +16,11 @@
 
 **从 GitHub 安装**（克隆后可编辑）：
 ```bash
-pip install -e git+https://github.com/cloud2ai/agentcore-tracking.git
+pip install -e git+https://github.com/cloud2ai/agentcore-metering.git
 ```
 若主项目以 submodule 方式引用，在仓库根目录执行：
 ```bash
-pip install -e path/to/agentcore-tracking
+pip install -e path/to/agentcore-metering
 ```
 - 主项目 Dockerfile 需遍历 `agentcore/` 下各子模块并执行 `pip install -e`。
 - 详细说明见主项目 README。
@@ -49,11 +49,11 @@ pytest tests -v
 ## 后端使用
 
 1. **注册**
-   - 在 `INSTALLED_APPS` 中加入 `'agentcore_tracking.adapters.django'`
-   - 在根 URLconf 中加入 `path('api/v1/admin/', include('agentcore_tracking.adapters.django.urls'))`
+   - 在 `INSTALLED_APPS` 中加入 `'agentcore_metering.adapters.django'`
+   - 在根 URLconf 中加入 `path('api/v1/admin/', include('agentcore_metering.adapters.django.urls'))`
 2. **调用 LLM 并落库用量**：
    ```python
-   from agentcore_tracking.adapters.django import LLMTracker
+   from agentcore_metering.adapters.django import LLMTracker
    content, usage = LLMTracker.call_and_track(
        messages=[{"role": "user", "content": "..."}],
        node_name="my_node",
@@ -107,7 +107,7 @@ pytest tests -v
 
 - 挂载在管理前缀下（如 `api/v1/admin/`）。
 - **鉴权**：`IsAdminUser`（staff 或 superuser），否则 403。
-- 若主项目启用 drf-spectacular，可在 Swagger UI（如 `/swagger`）查看，标签为 **llm-tracking**。
+- 若主项目启用 drf-spectacular，可在 Swagger UI（如 `/swagger`）查看，标签为 **llm-metering**。
 
 ### LLM 配置（全局与按用户）
 
@@ -263,5 +263,5 @@ pytest tests -v
 
 ## 数据与结构
 
-- 表：`llm_tracker_usage`（向后兼容）。
-- 包：`agentcore_tracking.adapters.django` 为完整 Django 应用（models、views、urls、admin、migrations）。业务逻辑位于 `adapters/django/services/`（如 `runtime_config`、`config_source`、`usage`、`usage_stats`）；对外调用入口为 `adapters/django/trackers/`，其中 LLM 为 `trackers/llm.py`。建议从 `agentcore_tracking.adapters.django` 或 `agentcore_tracking.adapters.django.trackers.llm` 导入 `LLMTracker`。后续若有其他 tracker 可在 `trackers/` 下新增模块（如 `other.py`）。
+- **表**：`llm_tracker_usage`（用量记录）、`agentcore_metering_llm_config`（LLM 提供商配置）。
+- **包**：`agentcore_metering.adapters.django` 为完整 Django 应用（models、views、urls、admin、migrations）。业务逻辑在 `adapters/django/services/`（如 `runtime_config`、`config_source`、`usage`、`usage_stats`）；对外调用入口在 `adapters/django/trackers/`，LLM 为 `trackers/llm.py`。建议从 `agentcore_metering.adapters.django` 或 `agentcore_metering.adapters.django.trackers.llm` 导入 `LLMTracker`。后续若有其他 tracker 可在 `trackers/` 下新增模块（如 `other.py`）。

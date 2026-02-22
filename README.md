@@ -1,10 +1,10 @@
-# Agentcore Tracking
+# Agentcore Metering
 
 [中文](README.zh-CN.md)
 
 Unified module for AI service invocation and statistics in Django projects.
 
-- Uses **LiteLLM** for completion and cost tracking.
+- Uses **LiteLLM** for completion and cost metering.
 - Stores cost as amount + currency (e.g. `cost`, `cost_currency`).
 - Uses USD as default cost currency from LiteLLM.
 
@@ -16,11 +16,11 @@ Unified module for AI service invocation and statistics in Django projects.
 
 **From GitHub** (editable after clone):
 ```bash
-pip install -e git+https://github.com/cloud2ai/agentcore-tracking.git
+pip install -e git+https://github.com/cloud2ai/agentcore-metering.git
 ```
 Or, when the host project uses it as a submodule, from repo root:
 ```bash
-pip install -e path/to/agentcore-tracking
+pip install -e path/to/agentcore-metering
 ```
 - The host project Dockerfile should iterate over `agentcore/`
   submodules and run `pip install -e`.
@@ -50,11 +50,11 @@ pytest tests -v
 ## Backend: usage
 
 1. **Register**
-   - Add `'agentcore_tracking.adapters.django'` to `INSTALLED_APPS`
-   - Add `path('api/v1/admin/', include('agentcore_tracking.adapters.django.urls'))` to root URLconf
+   - Add `'agentcore_metering.adapters.django'` to `INSTALLED_APPS`
+   - Add `path('api/v1/admin/', include('agentcore_metering.adapters.django.urls'))` to root URLconf
 2. **Call LLM and persist usage**:
    ```python
-   from agentcore_tracking.adapters.django import LLMTracker
+   from agentcore_metering.adapters.django import LLMTracker
    content, usage = LLMTracker.call_and_track(
        messages=[{"role": "user", "content": "..."}],
        node_name="my_node",
@@ -111,7 +111,7 @@ pytest tests -v
 - Mount under an admin prefix (e.g. `api/v1/admin/`).
 - **Auth**: `IsAdminUser` (staff or superuser), otherwise 403.
 - If the main project uses drf-spectacular, endpoints appear in
-  Swagger UI (e.g. `/swagger`) under **llm-tracking**.
+  Swagger UI (e.g. `/swagger`) under **llm-metering**.
 
 ### LLM configuration (global and per-user)
 
@@ -263,5 +263,5 @@ pytest tests -v
 
 ## Data and layout
 
-- Table: `llm_tracker_usage` (backward compatible).
-- Package: `agentcore_tracking.adapters.django` is a full Django app (models, views, urls, admin, migrations). Public tracker API lives under `trackers/` (e.g. `trackers/llm.py`); import `LLMTracker` from `agentcore_tracking.adapters.django` or `agentcore_tracking.adapters.django.trackers.llm`. Other tracker types may be added as new modules under `trackers/` (e.g. `trackers/other.py`).
+- **Tables**: `llm_tracker_usage` (usage records), `agentcore_metering_llm_config` (LLM provider config).
+- **Package**: `agentcore_metering.adapters.django` is a full Django app (models, views, urls, admin, migrations). The public API for LLM metering lives under `trackers/` (e.g. `trackers/llm.py`); import `LLMTracker` from `agentcore_metering.adapters.django` or `agentcore_metering.adapters.django.trackers.llm`. Additional tracker types may be added under `trackers/` (e.g. `trackers/other.py`).

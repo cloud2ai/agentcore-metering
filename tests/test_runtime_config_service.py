@@ -4,8 +4,8 @@ import logging
 import pytest
 from django.test import override_settings
 
-from agentcore_tracking.adapters.django.models import LLMConfig, LLMUsage
-from agentcore_tracking.adapters.django.services import runtime_config as rc
+from agentcore_metering.adapters.django.models import LLMConfig, LLMUsage
+from agentcore_metering.adapters.django.services import runtime_config as rc
 
 
 def _mock_completion_response(

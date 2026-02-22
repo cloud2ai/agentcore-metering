@@ -6,11 +6,11 @@ Paginated listing with filters (user_id, model, success, dates).
 import pytest
 from django.utils import timezone as django_tz
 
-from agentcore_tracking.adapters.django.services.usage import (
+from agentcore_metering.adapters.django.services.usage import (
     get_llm_usage_list,
     get_llm_usage_list_from_query,
 )
-from agentcore_tracking.adapters.django.models import LLMUsage
+from agentcore_metering.adapters.django.models import LLMUsage
 
 
 @pytest.mark.unit

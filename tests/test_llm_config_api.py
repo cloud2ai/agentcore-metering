@@ -3,7 +3,7 @@ API tests for LLM config: global and per-user GET/PUT/DELETE.
 """
 import pytest
 
-from agentcore_tracking.adapters.django.models import LLMConfig
+from agentcore_metering.adapters.django.models import LLMConfig
 
 
 @pytest.mark.api

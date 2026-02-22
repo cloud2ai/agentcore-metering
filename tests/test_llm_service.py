@@ -4,7 +4,7 @@ Tests for get_litellm_params: config validation and ValueError paths.
 import pytest
 from django.test import override_settings
 
-from agentcore_tracking.adapters.django.services import get_litellm_params
+from agentcore_metering.adapters.django.services import get_litellm_params
 
 
 @pytest.mark.unit
