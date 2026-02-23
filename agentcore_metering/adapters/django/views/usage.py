@@ -5,13 +5,17 @@ from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from ..serializers import (
+from agentcore_metering.adapters.django.serializers import (
     ErrorDetailSerializer,
     LLMUsageListResponseSerializer,
     TokenStatsResponseSerializer,
 )
-from ..services.usage import get_llm_usage_list_from_query
-from ..services.usage_stats import get_token_stats_from_query
+from agentcore_metering.adapters.django.services.usage import (
+    get_llm_usage_list_from_query,
+)
+from agentcore_metering.adapters.django.services.usage_stats import (
+    get_token_stats_from_query,
+)
 
 
 class AdminTokenStatsView(APIView):

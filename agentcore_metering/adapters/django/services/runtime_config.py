@@ -13,23 +13,30 @@ import logging
 from decimal import Decimal
 from typing import Any, Dict, Optional, Tuple
 
-import litellm
-from litellm import completion_cost
 from django.conf import settings
 from django.utils.translation import activate, gettext as _
+import litellm
+from litellm import completion_cost
 
-from ....constants import (
+from agentcore_metering.adapters.django.llm_static.load import (
+    get_provider_defaults,
+)
+from agentcore_metering.adapters.django.models import LLMConfig, LLMUsage
+from agentcore_metering.adapters.django.services.config_source import (
+    get_config_from_db,
+)
+from agentcore_metering.adapters.django.utils import (
+    _read_field,
+    _read_nested_int,
+    _safe_int,
+)
+from agentcore_metering.constants import (
     DEFAULT_COST_CURRENCY,
     DEFAULT_MAX_TOKENS,
     DEFAULT_TEMPERATURE,
     DEFAULT_TOP_P,
     TEST_MAX_TOKENS,
 )
-
-from ..llm_static.load import get_provider_defaults
-from ..models import LLMConfig, LLMUsage
-from ..utils import _read_field, _read_nested_int, _safe_int
-from .config_source import get_config_from_db
 
 logger = logging.getLogger(__name__)
 
@@ -437,7 +444,8 @@ def validate_llm_config(
         logger.info(
             "LLM validate request "
             f"provider={provider} user_id={user_id} "
-            f"model={params.get('model')} max_tokens={params.get('max_tokens')} "
+            f"model={params.get('model')} "
+            f"max_tokens={params.get('max_tokens')} "
             f"has_api_key={bool(params.get('api_key'))} "
             f"api_base={params.get('api_base')}"
         )
@@ -459,7 +467,8 @@ def validate_llm_config(
             "LLM validate usage "
             f"provider={provider} user_id={user_id} model={actual_model} "
             f"prompt_tokens={prompt_tokens} "
-            f"completion_tokens={completion_tokens} total_tokens={total_tokens}"
+            f"completion_tokens={completion_tokens} "
+            f"total_tokens={total_tokens}"
         )
 
         if user is not None:
@@ -558,7 +567,8 @@ def run_test_call(
         "LLM test-call request "
         f"config_uuid={config_uuid_value} config_id={config_id_value} "
         f"user_id={user_id} provider={provider} "
-        f"model={params.get('model')} max_tokens={params.get('max_tokens')} "
+        f"model={params.get('model')} "
+        f"max_tokens={params.get('max_tokens')} "
         f"prompt_len={len((prompt or '').strip())} "
         f"has_api_key={bool(params.get('api_key'))} "
         f"api_base={params.get('api_base')}"
@@ -626,7 +636,8 @@ def run_test_call(
         f"config_uuid={config_uuid_value} config_id={config_id_value} "
         f"user_id={user_id} model={actual_model} "
         f"prompt_tokens={prompt_tokens} "
-        f"completion_tokens={completion_tokens} total_tokens={total_tokens}"
+        f"completion_tokens={completion_tokens} "
+        f"total_tokens={total_tokens}"
     )
     if not content_str:
         snapshot = _response_debug_snapshot(
@@ -777,3 +788,4 @@ def get_litellm_params(user_id: Optional[int] = None) -> Dict[str, Any]:
     config = dict(getattr(settings, settings_key, {}))
     _validate_config(provider, config)
     return _litellm_kwargs_from_config(provider, config)
+ config)

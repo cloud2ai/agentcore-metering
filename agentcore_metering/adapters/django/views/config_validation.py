@@ -4,13 +4,13 @@ from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from ..serializers import (
+from agentcore_metering.adapters.django.serializers import (
     ConfigTestResponseSerializer,
     LLMConfigWriteSerializer,
     TestCallRequestSerializer,
     TestCallResponseSerializer,
 )
-from ..services.runtime_config import (
+from agentcore_metering.adapters.django.services.runtime_config import (
     VALIDATION_MESSAGE_IDS,
     get_validation_message,
     run_test_call,

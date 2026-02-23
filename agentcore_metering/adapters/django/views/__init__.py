@@ -1,23 +1,26 @@
 """
 Admin API views split by domain.
 """
-from .config_catalog import (
+from agentcore_metering.adapters.django.views.config_catalog import (
     AdminLLMConfigModelsView,
     AdminLLMConfigProvidersView,
 )
-from .config_management import (
+from agentcore_metering.adapters.django.views.config_management import (
     AdminLLMConfigAllListView,
     AdminLLMConfigDetailView,
     AdminLLMConfigGlobalView,
     AdminLLMConfigUserDetailView,
     AdminLLMConfigUserListView,
 )
-from .config_validation import (
+from agentcore_metering.adapters.django.views.config_validation import (
     AdminLLMConfigTestCallView,
     AdminLLMConfigTestView,
 )
-from .usage import AdminLLMUsageListView, AdminTokenStatsView
-from .users import AdminUsersListView
+from agentcore_metering.adapters.django.views.usage import (
+    AdminLLMUsageListView,
+    AdminTokenStatsView,
+)
+from agentcore_metering.adapters.django.views.users import AdminUsersListView
 
 __all__ = [
     "AdminLLMConfigAllListView",

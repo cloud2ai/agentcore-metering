@@ -6,7 +6,7 @@ Include under an admin prefix, e.g.:
 """
 from django.urls import path
 
-from .views import (
+from agentcore_metering.adapters.django.views import (
     AdminLLMConfigAllListView,
     AdminLLMConfigDetailView,
     AdminLLMConfigGlobalView,

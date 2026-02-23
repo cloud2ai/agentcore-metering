@@ -6,13 +6,15 @@ from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from ..models import LLMConfig
-from ..serializers import (
+from agentcore_metering.adapters.django.models import LLMConfig
+from agentcore_metering.adapters.django.serializers import (
     ErrorDetailSerializer,
     LLMConfigSerializer,
     LLMConfigWriteSerializer,
 )
-from ..services.model_catalog import get_model_type_for_model_id
+from agentcore_metering.adapters.django.services.model_catalog import (
+    get_model_type_for_model_id,
+)
 
 User = get_user_model()
 

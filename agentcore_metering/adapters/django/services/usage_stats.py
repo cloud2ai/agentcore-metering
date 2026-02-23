@@ -13,7 +13,7 @@ from django.db.models.functions import TruncDate, TruncHour, TruncMonth
 from django.utils.dateparse import parse_datetime
 from django.utils import timezone
 
-from ..models import LLMUsage
+from agentcore_metering.adapters.django.models import LLMUsage
 
 
 def _parse_date(value: Optional[str]) -> Optional[datetime]:
@@ -185,8 +185,9 @@ def get_time_series_stats(
 
     # Fill missing buckets so the series is contiguous. Bucket key must match
     # the annotation: day -> TruncHour (datetime), month -> TruncDate (date),
-    # year -> TruncMonth (datetime, first day of month). _build_expected_buckets
-    # returns the same types so bucket.isoformat() aligns with by_bucket keys.
+    # year -> TruncMonth (datetime, first day of month).
+    # _build_expected_buckets returns the same types so bucket.isoformat()
+    # aligns with by_bucket keys.
     filled = []
     by_bucket = {row["bucket"]: row for row in rows}
     for bucket in _build_expected_buckets(

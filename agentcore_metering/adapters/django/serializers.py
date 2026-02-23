@@ -6,7 +6,7 @@ for OpenAPI/Swagger documentation (token stats, usage list, errors).
 """
 from rest_framework import serializers
 
-from .models import LLMConfig
+from agentcore_metering.adapters.django.models import LLMConfig
 
 
 def _mask_secrets(config: dict) -> dict:

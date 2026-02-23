@@ -1,7 +1,7 @@
 """Admin for LLM usage and config (agentcore_metering Django adapter)."""
 from django.contrib import admin
 
-from .models import LLMConfig, LLMUsage
+from agentcore_metering.adapters.django.models import LLMConfig, LLMUsage
 
 
 @admin.register(LLMUsage)

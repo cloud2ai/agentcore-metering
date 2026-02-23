@@ -6,7 +6,7 @@ User configs first, then global.
 """
 from typing import Any, Dict, List, Optional
 
-from ..models import LLMConfig
+from agentcore_metering.adapters.django.models import LLMConfig
 
 
 def _get_active_configs(scope: str, user_id: Optional[int]) -> List[LLMConfig]:

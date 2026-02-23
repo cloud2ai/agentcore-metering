@@ -3,9 +3,16 @@ from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from ..serializers import ModelsResponseSerializer, ProvidersResponseSerializer
-from ..services.model_catalog import get_providers_with_models
-from ..services.runtime_config import get_provider_params_schema
+from agentcore_metering.adapters.django.serializers import (
+    ModelsResponseSerializer,
+    ProvidersResponseSerializer,
+)
+from agentcore_metering.adapters.django.services.model_catalog import (
+    get_providers_with_models,
+)
+from agentcore_metering.adapters.django.services.runtime_config import (
+    get_provider_params_schema,
+)
 
 
 class AdminLLMConfigProvidersView(APIView):

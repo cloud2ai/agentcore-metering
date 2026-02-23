@@ -20,7 +20,7 @@ See llm_static/load.py.
 """
 from typing import Any, Dict
 
-from ..llm_static.load import (
+from agentcore_metering.adapters.django.llm_static.load import (
     get_capability_labels,
     get_mode_to_model_type,
     get_providers_with_models as _load_providers_with_models,
