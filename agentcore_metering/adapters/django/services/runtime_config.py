@@ -788,4 +788,3 @@ def get_litellm_params(user_id: Optional[int] = None) -> Dict[str, Any]:
     config = dict(getattr(settings, settings_key, {}))
     _validate_config(provider, config)
     return _litellm_kwargs_from_config(provider, config)
- config)
