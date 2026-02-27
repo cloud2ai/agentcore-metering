@@ -10,6 +10,22 @@ from agentcore_metering.adapters.django.services.usage_stats import (
 )
 
 
+def _safe_positive_int(
+    value: Any,
+    default: int,
+    *,
+    minimum: int = 1,
+) -> int:
+    """Return a clamped positive integer parsed from query/input values."""
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    if parsed < minimum:
+        return minimum
+    return parsed
+
+
 def get_llm_usage_list(
     page: int = 1,
     page_size: int = 20,
@@ -23,7 +39,9 @@ def get_llm_usage_list(
     Return paginated LLM usage records with filters.
     Applied filters: user_id, model (icontains), success, start_date, end_date.
     """
-    page_size = min(max(1, page_size), 100)
+    page = _safe_positive_int(page, 1, minimum=1)
+    page_size = _safe_positive_int(page_size, 20, minimum=1)
+    page_size = min(page_size, 100)
     qs = (
         LLMUsage.objects.select_related("user")
         .order_by("-created_at")
@@ -83,8 +101,9 @@ def get_llm_usage_list_from_query(params: Any) -> Dict[str, Any]:
     Build paginated LLM usage list from a query params dict
     (e.g. request.query_params).
     """
-    page = int(params.get("page", 1))
-    page_size = min(int(params.get("page_size", 20)), 100)
+    page = _safe_positive_int(params.get("page"), 1, minimum=1)
+    page_size = _safe_positive_int(params.get("page_size"), 20, minimum=1)
+    page_size = min(page_size, 100)
     user_id = (params.get("user_id") or "").strip() or None
     model_filter = (params.get("model") or "").strip() or None
     success_filter = (params.get("success") or "").strip() or None

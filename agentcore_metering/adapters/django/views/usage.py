@@ -52,9 +52,9 @@ class AdminTokenStatsView(APIView):
             ),
             OpenApiParameter(
                 "user_id",
-                OpenApiTypes.UUID,
+                OpenApiTypes.INT,
                 OpenApiParameter.QUERY,
-                description="Filter by user UUID",
+                description="Filter by user id",
             ),
             OpenApiParameter(
                 "granularity",
@@ -113,9 +113,9 @@ class AdminLLMUsageListView(APIView):
             ),
             OpenApiParameter(
                 "user_id",
-                OpenApiTypes.UUID,
+                OpenApiTypes.INT,
                 OpenApiParameter.QUERY,
-                description="Filter by user UUID",
+                description="Filter by user id",
             ),
             OpenApiParameter(
                 "model",

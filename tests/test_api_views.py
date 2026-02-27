@@ -78,16 +78,12 @@ class TestAdminLLMUsageListAPI:
         assert body["page"] == 1
         assert body["page_size"] == 10
 
-    def test_admin_invalid_page_raises_or_returns_error(self, admin_client):
-        """
-        Invalid page param: view may raise ValueError (test client re-raises)
-        or return 400/500. Both are acceptable error behavior.
-        """
-        try:
-            response = admin_client.get(
-                "/api/v1/admin/llm-usage/",
-                {"page": "not-a-number"},
-            )
-            assert response.status_code in (400, 422, 500)
-        except ValueError:
-            pass
+    def test_admin_invalid_page_falls_back_to_default(self, admin_client):
+        response = admin_client.get(
+            "/api/v1/admin/llm-usage/",
+            {"page": "not-a-number"},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["page"] == 1
+        assert body["page_size"] == 20

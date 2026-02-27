@@ -43,9 +43,9 @@ def get_config_from_db(
         Dict with keys: provider (str), config (dict).
         None if no active config in DB.
     """
-    configs = _get_active_configs(LLMConfig.Scope.USER, user_id)
-    if not configs and user_id is not None:
-        configs = _get_active_configs(LLMConfig.Scope.GLOBAL, None)
+    configs: List[LLMConfig] = []
+    if user_id is not None:
+        configs = _get_active_configs(LLMConfig.Scope.USER, user_id)
     if not configs:
         configs = _get_active_configs(LLMConfig.Scope.GLOBAL, None)
     if not configs:

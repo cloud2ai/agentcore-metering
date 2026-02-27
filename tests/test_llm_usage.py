@@ -164,10 +164,17 @@ class TestGetLlmUsageListFromQuery:
         assert "results" in out
         assert "total" in out
 
-    def test_invalid_page_raises_value_error(self):
-        with pytest.raises(ValueError):
-            get_llm_usage_list_from_query({"page": "not-a-number"})
+    def test_invalid_page_falls_back_to_default(self):
+        out = get_llm_usage_list_from_query({"page": "not-a-number"})
+        assert out["page"] == 1
+        assert out["page_size"] == 20
 
-    def test_invalid_page_size_raises_value_error(self):
-        with pytest.raises(ValueError):
-            get_llm_usage_list_from_query({"page_size": "nope"})
+    def test_invalid_page_size_falls_back_to_default(self):
+        out = get_llm_usage_list_from_query({"page_size": "nope"})
+        assert out["page"] == 1
+        assert out["page_size"] == 20
+
+    def test_non_positive_page_and_page_size_are_clamped(self):
+        out = get_llm_usage_list_from_query({"page": "0", "page_size": "-5"})
+        assert out["page"] == 1
+        assert out["page_size"] == 1

@@ -84,6 +84,38 @@ class TestRuntimeConfigService:
         assert params["api_key"] == "global-key"
         assert params["model"] == "gpt-4o-mini"
 
+    def test_get_litellm_params_without_user_id_ignores_user_configs(
+        self, django_user_model
+    ):
+        user = django_user_model.objects.create_user(
+            username="u_missing",
+            email="u_missing@example.com",
+            password="pass",
+        )
+        LLMConfig.objects.create(
+            scope=LLMConfig.Scope.USER,
+            user=user,
+            model_type=LLMConfig.MODEL_TYPE_LLM,
+            provider="openai",
+            config={"api_key": "user-key", "model": "gpt-4o-mini"},
+            is_active=True,
+            order=0,
+        )
+        LLMConfig.objects.create(
+            scope=LLMConfig.Scope.GLOBAL,
+            user=None,
+            model_type=LLMConfig.MODEL_TYPE_LLM,
+            provider="openai",
+            config={"api_key": "global-key", "model": "gpt-4o-mini"},
+            is_active=True,
+            order=0,
+        )
+
+        params = rc.get_litellm_params()
+
+        assert params["api_key"] == "global-key"
+        assert params["model"] == "gpt-4o-mini"
+
     @override_settings(
         LLM_PROVIDER="dashscope",
         DASHSCOPE_CONFIG={"api_key": "dashscope-key"},
