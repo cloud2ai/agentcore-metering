@@ -92,7 +92,8 @@ class TestCallAndTrackEmptyResponse:
 @pytest.mark.unit
 class TestCallAndTrackUsageExtraction:
     @patch(
-        "agentcore_metering.adapters.django.trackers.llm.LLMTracker._save_usage_to_db"
+        "agentcore_metering.adapters.django.trackers.llm.LLMTracker"
+        "._save_usage_to_db"
     )
     @patch(
         "agentcore_metering.adapters.django.trackers.llm.litellm"
@@ -134,7 +135,8 @@ class TestCallAndTrackUsageExtraction:
         assert save_kwargs["reasoning_tokens"] == 2
 
     @patch(
-        "agentcore_metering.adapters.django.trackers.llm.LLMTracker._save_usage_to_db"
+        "agentcore_metering.adapters.django.trackers.llm.LLMTracker"
+        "._save_usage_to_db"
     )
     @patch(
         "agentcore_metering.adapters.django.trackers.llm.litellm"

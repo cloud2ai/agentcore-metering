@@ -28,8 +28,19 @@ def _mask_secrets(config: dict) -> dict:
 
 class LLMConfigSerializer(serializers.ModelSerializer):
     """
-    Read/write LLM config. On read, api_key (and key) in config are masked.
+    Read LLM config. On read, api_key (and key) in config are masked.
+    is_default is True when this config is the default (earliest enabled
+    global config by created_at); frontend can use it to show the default.
     """
+
+    is_default = serializers.BooleanField(
+        read_only=True,
+        help_text=(
+            "True if this config is the one used when model_uuid is not set "
+            "(current default). When there is only one active global config, "
+            "it is the default."
+        ),
+    )
 
     class Meta:
         model = LLMConfig
@@ -42,11 +53,17 @@ class LLMConfigSerializer(serializers.ModelSerializer):
             "provider",
             "config",
             "is_active",
-            "order",
+            "is_default",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "uuid", "created_at", "updated_at"]
+        read_only_fields = [
+            "id",
+            "uuid",
+            "is_default",
+            "created_at",
+            "updated_at",
+        ]
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
@@ -55,6 +72,11 @@ class LLMConfigSerializer(serializers.ModelSerializer):
         if instance.user_id:
             data["user_id"] = instance.user_id
             data["username"] = getattr(instance.user, "username", None)
+        default_uuid = self.context.get("default_config_uuid")
+        data["is_default"] = (
+            default_uuid is not None
+            and str(instance.uuid) == str(default_uuid)
+        )
         return data
 
 
@@ -86,11 +108,13 @@ class LLMConfigWriteSerializer(serializers.Serializer):
         default=True,
         help_text="Whether this config is active for resolution.",
     )
-    order = serializers.IntegerField(
+    is_default = serializers.BooleanField(
         required=False,
-        default=0,
-        min_value=0,
-        help_text="Order for strategy (e.g. first or round-robin).",
+        default=False,
+        help_text=(
+            "If true, set this global config as the default (clears default "
+            "on other global configs). Ignored for user-scope configs."
+        ),
     )
 
 

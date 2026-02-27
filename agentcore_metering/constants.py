@@ -1,5 +1,8 @@
-# Shared constants for agentcore_metering (optional).
+"""
+Shared constants for agentcore_metering.
 
+Default currency, LLM completion defaults, and test limits.
+"""
 # Default currency for cost when not specified (e.g. LiteLLM returns USD).
 DEFAULT_COST_CURRENCY = "USD"
 

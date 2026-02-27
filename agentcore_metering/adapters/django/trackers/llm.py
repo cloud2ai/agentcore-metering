@@ -8,6 +8,7 @@ from decimal import Decimal
 from typing import Any, Dict, Optional, Tuple
 
 from django.db import transaction
+from django.utils import timezone
 import litellm
 from litellm import completion_cost
 
@@ -32,14 +33,16 @@ def _get_cost_from_response(response: Any) -> Optional[Decimal]:
         cost = completion_cost(completion_response=response)
         if cost is not None:
             return Decimal(str(cost))
-    except Exception:
-        pass
+    except (TypeError, ValueError) as e:
+        logger.debug("completion_cost or Decimal failed: %s", e)
+    except Exception as e:
+        logger.debug("completion_cost failed: %s", e)
     hidden = getattr(response, "_hidden_params", None) or {}
     cost = hidden.get("response_cost")
     if cost is not None:
         try:
             return Decimal(str(cost))
-        except Exception:
+        except (TypeError, ValueError):
             model = getattr(response, "model", "unknown")
             logger.warning(
                 "Invalid response_cost in hidden params "
@@ -64,9 +67,13 @@ class LLMTracker:
         response_format: Optional[Dict] = None,
         node_name: str = "unknown",
         state: Optional[Dict] = None,
+        model_uuid: Optional[str] = None,
     ) -> Tuple[str, Dict[str, Any]]:
         """
         Call LLM via LiteLLM and persist usage + cost.
+
+        When model_uuid is provided, uses that LLM config. Otherwise uses
+        the earliest enabled LLM config (user scope then global).
 
         Returns:
             (response_content, usage_dict with model, prompt_tokens,
@@ -77,8 +84,8 @@ class LLMTracker:
             raise ValueError("Messages cannot be empty")
 
         user_id = state.get("user_id") if state else None
-        params = get_litellm_params(user_id=user_id)
-        model = params.pop("model", "unknown")
+        params = get_litellm_params(user_id=user_id, model_uuid=model_uuid)
+        model = params.get("model", "unknown")
 
         if max_tokens is not None:
             params["max_tokens"] = max_tokens
@@ -96,6 +103,7 @@ class LLMTracker:
 
         params["messages"] = messages
         effective_state = {**(state or {}), "node_name": node_name}
+        request_started_at = timezone.now()
         logger.info(
             f"Starting {TASK_LLM_CALL} node_name={node_name} "
             f"model={model} message_count={len(messages)}"
@@ -208,6 +216,7 @@ class LLMTracker:
                 cost_currency=cost_currency,
                 success=True,
                 error=None,
+                started_at=request_started_at,
             )
 
             logger.info(
@@ -246,6 +255,7 @@ class LLMTracker:
                 cost_currency=DEFAULT_COST_CURRENCY,
                 success=False,
                 error=str(e),
+                started_at=request_started_at,
             )
             raise
 
@@ -263,8 +273,9 @@ class LLMTracker:
         cost_currency: str = "USD",
         success: bool = True,
         error: Optional[str] = None,
+        started_at: Optional[Any] = None,
     ) -> None:
-        """Persist one LLM usage record (tokens + optional cost/currency)."""
+        """Persist one LLM usage record (tokens, optional cost, started_at)."""
         try:
             state = state or {}
             user_id = state.get("user_id")
@@ -303,6 +314,7 @@ class LLMTracker:
                     success=success,
                     error=error,
                     metadata=metadata,
+                    started_at=started_at,
                 )
         except Exception as e:
             logger.warning(

@@ -57,6 +57,13 @@ def _parse_end_date(value: Optional[str]) -> Optional[datetime]:
 
 
 def get_summary_stats(start_date=None, end_date=None, user_id=None):
+    """
+    Return aggregate token and cost stats for the given date range and user.
+
+    Optional filters: start_date, end_date (timezone-aware), user_id.
+    Returns dict with total_* tokens, total_calls, successful_calls,
+    failed_calls, total_cost, total_cost_currency.
+    """
     qs = LLMUsage.objects.all()
     if user_id:
         qs = qs.filter(user_id=user_id)
@@ -95,6 +102,12 @@ def get_summary_stats(start_date=None, end_date=None, user_id=None):
 
 
 def get_stats_by_model(start_date=None, end_date=None, user_id=None):
+    """
+    Return per-model aggregate stats (calls, tokens, cost) for the given range.
+
+    Optional filters: start_date, end_date, user_id.
+    Ordered by total_tokens desc.
+    """
     qs = LLMUsage.objects.values("model").annotate(
         total_calls=Count("id"),
         total_prompt_tokens=Sum("prompt_tokens"),

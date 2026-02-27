@@ -1,3 +1,9 @@
+"""
+Admin API views for LLM config CRUD, test-call, and validation.
+
+All endpoints require IsAdminUser. Used by management UI for global and
+per-user LLM provider configuration.
+"""
 from django.contrib.auth import get_user_model
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiParameter, extend_schema
@@ -11,6 +17,10 @@ from agentcore_metering.adapters.django.serializers import (
     ErrorDetailSerializer,
     LLMConfigSerializer,
     LLMConfigWriteSerializer,
+)
+from agentcore_metering.adapters.django.services.config_source import (
+    get_default_llm_config_uuid,
+    set_default_llm_config,
 )
 from agentcore_metering.adapters.django.services.model_catalog import (
     get_model_type_for_model_id,
@@ -61,7 +71,7 @@ class AdminLLMConfigAllListView(APIView):
         qs = (
             LLMConfig.objects.filter(model_type=LLMConfig.MODEL_TYPE_LLM)
             .select_related("user")
-            .order_by("scope", "order", "id")
+            .order_by("scope", "created_at", "id")
         )
         if scope_param == "global":
             qs = qs.filter(scope=LLMConfig.Scope.GLOBAL)
@@ -69,7 +79,10 @@ class AdminLLMConfigAllListView(APIView):
             qs = qs.filter(scope=LLMConfig.Scope.USER)
             if user_id_param is not None and str(user_id_param).strip():
                 qs = qs.filter(user_id=user_id_param)
-        return Response(LLMConfigSerializer(qs, many=True).data)
+        ctx = {"default_config_uuid": get_default_llm_config_uuid()}
+        return Response(
+            LLMConfigSerializer(qs, many=True, context=ctx).data
+        )
 
 
 class AdminLLMConfigGlobalView(APIView):
@@ -85,7 +98,8 @@ class AdminLLMConfigGlobalView(APIView):
         tags=["llm-metering"],
         summary="List global LLM configs",
         description=(
-            "List global LLM configs (model_type=llm, ordered by order, id)."
+            "List global LLM configs (model_type=llm, ordered by "
+            "created_at, id)."
         ),
         responses={200: LLMConfigSerializer(many=True)},
     )
@@ -95,16 +109,19 @@ class AdminLLMConfigGlobalView(APIView):
                 scope=LLMConfig.Scope.GLOBAL,
                 model_type=LLMConfig.MODEL_TYPE_LLM,
             )
-            .order_by("order", "id")
+            .order_by("created_at", "id")
         )
-        return Response(LLMConfigSerializer(qs, many=True).data)
+        ctx = {"default_config_uuid": get_default_llm_config_uuid()}
+        return Response(
+            LLMConfigSerializer(qs, many=True, context=ctx).data
+        )
 
     @extend_schema(
         tags=["llm-metering"],
         summary="Create LLM config",
         description=(
             "Add one global or user config. Body: provider, config; optional "
-            "scope (global|user), user_id, is_active, order."
+            "scope (global|user), user_id, is_active."
         ),
         request=LLMConfigWriteSerializer,
         responses={201: LLMConfigSerializer, 400: ErrorDetailSerializer},
@@ -142,7 +159,6 @@ class AdminLLMConfigGlobalView(APIView):
                 provider=(data.get("provider") or "openai").strip().lower(),
                 config=data.get("config") or {},
                 is_active=data.get("is_active", True),
-                order=data.get("order", 0),
             )
         else:
             obj = LLMConfig.objects.create(
@@ -152,10 +168,13 @@ class AdminLLMConfigGlobalView(APIView):
                 provider=(data.get("provider") or "openai").strip().lower(),
                 config=data.get("config") or {},
                 is_active=data.get("is_active", True),
-                order=data.get("order", 0),
+                is_default=data.get("is_default", False),
             )
+            if data.get("is_default"):
+                set_default_llm_config(obj)
+        ctx = {"default_config_uuid": get_default_llm_config_uuid()}
         return Response(
-            LLMConfigSerializer(obj).data,
+            LLMConfigSerializer(obj, context=ctx).data,
             status=status.HTTP_201_CREATED,
         )
 
@@ -178,14 +197,15 @@ class AdminLLMConfigDetailView(APIView):
                 {"detail": "Not found."},
                 status=status.HTTP_404_NOT_FOUND,
             )
-        return Response(LLMConfigSerializer(obj).data)
+        ctx = {"default_config_uuid": get_default_llm_config_uuid()}
+        return Response(LLMConfigSerializer(obj, context=ctx).data)
 
     @extend_schema(
         tags=["llm-metering"],
         summary="Update LLM config",
         description=(
             "Update one LLM config by uuid. Body: optional provider, config, "
-            "is_active, order."
+            "is_active, is_default (global only)."
         ),
         request=LLMConfigWriteSerializer,
         responses={
@@ -211,8 +231,10 @@ class AdminLLMConfigDetailView(APIView):
             obj.config = data["config"]
         if "is_active" in data:
             obj.is_active = data["is_active"]
-        if "order" in data:
-            obj.order = data["order"]
+        if "is_default" in data and obj.scope == LLMConfig.Scope.GLOBAL:
+            obj.is_default = data["is_default"]
+            if obj.is_default:
+                set_default_llm_config(obj)
         model_type_raw = request.data.get("model_type")
         mt_ok = (
             model_type_raw is not None
@@ -231,7 +253,8 @@ class AdminLLMConfigDetailView(APIView):
                 if derived:
                     obj.model_type = derived
         obj.save()
-        return Response(LLMConfigSerializer(obj).data)
+        ctx = {"default_config_uuid": get_default_llm_config_uuid()}
+        return Response(LLMConfigSerializer(obj, context=ctx).data)
 
     @extend_schema(
         tags=["llm-metering"],
@@ -294,15 +317,18 @@ class AdminLLMConfigUserListView(APIView):
         )
         if user_id is not None and str(user_id).strip():
             qs = qs.filter(user_id=user_id)
-        qs = qs.order_by("order", "id")
-        return Response(LLMConfigSerializer(qs, many=True).data)
+        qs = qs.order_by("created_at", "id")
+        ctx = {"default_config_uuid": get_default_llm_config_uuid()}
+        return Response(
+            LLMConfigSerializer(qs, many=True, context=ctx).data
+        )
 
 
 class AdminLLMConfigUserDetailView(APIView):
     """
     GET: Return one user's LLM config (404 if not set).
     PUT: Create or update that user's LLM config.
-    DELETE: Remove user config so they fall back to global/settings.
+    DELETE: Remove user config so they fall back to global default.
     """
 
     permission_classes = [IsAdminUser]
@@ -332,7 +358,8 @@ class AdminLLMConfigUserDetailView(APIView):
                 {"detail": "No LLM config for this user. Use PUT to create."},
                 status=status.HTTP_404_NOT_FOUND,
             )
-        return Response(LLMConfigSerializer(obj).data)
+        ctx = {"default_config_uuid": get_default_llm_config_uuid()}
+        return Response(LLMConfigSerializer(obj, context=ctx).data)
 
     @extend_schema(
         tags=["llm-metering"],
@@ -366,12 +393,13 @@ class AdminLLMConfigUserDetailView(APIView):
                 "config": data.get("config") or {},
             },
         )
-        return Response(LLMConfigSerializer(obj).data)
+        ctx = {"default_config_uuid": get_default_llm_config_uuid()}
+        return Response(LLMConfigSerializer(obj, context=ctx).data)
 
     @extend_schema(
         tags=["llm-metering"],
         summary="Delete user LLM config",
-        description="Remove user config so they fall back to global/settings.",
+        description="Remove user config so they fall back to global default.",
         responses={204: None, 404: ErrorDetailSerializer},
     )
     def delete(self, request, user_id):

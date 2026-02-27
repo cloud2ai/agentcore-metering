@@ -61,10 +61,10 @@ pytest tests -v
    )
    ```
    - `state` 为可选（任务/用户上下文）。
-   - 若 `state` 中包含 `user_id`，且该用户配置了单独 LLM 配置，则按用户配置调用。
+   - 若 `state` 中包含 `user_id`，且该用户配置了单独 LLM 配置，则按用户配置调用。可传 `model_uuid` 指定使用某条配置；不传则使用最早启用的模型。
 3. **配置**
    - 所有配置可通过管理 API 管理（全局默认 + 可选按用户覆盖）。
-   - DB 解析按 `order` 取第一条激活配置：用户作用域 -> 全局作用域 -> Django `settings` 回退。
+   - 未指定 model_uuid 时，解析取最早创建的启用配置（按 created_at，全局可设 is_default）：用户作用域 -> 全局作用域；无 DB 配置时报错，不做 settings 回退。
    - LLM 调用经 **LiteLLM**。
    - 费用（USD）按 LiteLLM 参考价估算并写入单次调用与统计。
 
@@ -95,11 +95,7 @@ pytest tests -v
 | `volcengine`    | doubao-pro-32k（字节豆包） |
 | `openrouter`    | google/gemma-2-9b-it:free |
 
-- Settings 回退配置：
-  - 设置 `LLM_PROVIDER` 及对应 config 键（如 `OPENAI_CONFIG`、`ANTHROPIC_CONFIG` 等）
-  - config 字典至少包含 `api_key`
-  - 所有提供商都支持可选 `api_base`（未设用官方 URL，可设代理/转发）
-  - Azure 需 `api_base`，且通常需 `deployment`
+- 配置仅来自 DB（管理 API），不做 Django settings 回退；需至少有一条启用的全局或用户配置方可调用。
 
 ---
 
@@ -113,27 +109,27 @@ pytest tests -v
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `.../llm-config/` | 获取全局 LLM 配置列表（按 order、id 排序） |
-| POST | `.../llm-config/` | 新增一条全局配置。Body：`provider`、`config`（及可选 `is_active`、`order`） |
+| GET | `.../llm-config/` | 获取全局 LLM 配置列表（按 created_at、id 排序） |
+| POST | `.../llm-config/` | 新增一条全局配置。Body：`provider`、`config`（及可选 `is_active`） |
 | GET | `.../llm-config/<pk>/` | 获取指定 id 的配置 |
 | PUT | `.../llm-config/<pk>/` | 更新指定 id 的配置 |
 | DELETE | `.../llm-config/<pk>/` | 删除指定 id 的配置 |
 | GET | `.../llm-config/providers/` | 各提供商参数 schema（必填/可选键、默认 model 与 api_base），用于构建表单 |
 | GET | `.../llm-config/models/` | 提供商与模型列表（含能力标签，如 text-to-text/vision/code/reasoning） |
 | POST | `.../llm-config/test/` | 校验凭证且不保存。Body：`provider`、`config`。返回 `{ "ok": true }` 或 `{ "ok": false, "detail": "..." }` |
-| POST | `.../llm-config/test-call/` | 使用已保存配置执行一次同步测试调用并落库。Body：`config_id`、`prompt`，可选 `max_tokens` |
+| POST | `.../llm-config/test-call/` | 执行一次同步测试调用并落库。Body：`config_uuid`（或兼容 `config_id`）、`prompt`，可选 `max_tokens` |
 | GET | `.../llm-config/users/` | 按用户配置列表（可选 `?user_id=` 筛选） |
 | GET | `.../llm-config/users/<user_id>/` | 获取指定用户的配置（未设置则 404） |
 | PUT | `.../llm-config/users/<user_id>/` | 创建或更新该用户的配置 |
-| DELETE | `.../llm-config/users/<user_id>/` | 删除该用户配置（回退到全局/settings） |
+| DELETE | `.../llm-config/users/<user_id>/` | 删除该用户配置（回退到全局默认） |
 
 - **POST/PUT body**
   - `provider`（默认 `openai`）
   - `config`（单层 JSON，如 `api_key`、`model`、`api_base`、`deployment`、`max_tokens`、`temperature`、`top_p`）
-  - 创建/列表管理场景可额外传 `scope`、`user_id`、`is_active`、`order`、可选 `model_type`
+  - 创建/列表管理场景可额外传 `scope`、`user_id`、`is_active`、可选 `model_type`
   - 必填/可选键因提供商而异（如 Azure 需 `api_base`、`deployment`）
   - 可通过 `GET .../llm-config/providers/` 获取 schema
-  - GET 返回中 `config.api_key`、`config.key` 会脱敏（如 `sk-**xxxx`）
+  - GET 返回中 `config.api_key`、`config.key` 会脱敏（如 `sk-**xxxx`）；`is_default` 表示该条是否为当前默认配置（未传 model_uuid 时使用的「最早启用的全局配置」），前端可用于高亮展示默认模型。
 
 - **GET `.../llm-config/providers/`**
   - 返回格式：`{ "providers": { "<provider>": { "required": [...], "optional": [...], "editable_params": [...], "default_model": "...", "default_api_base": "..." } } }`
@@ -147,7 +143,7 @@ pytest tests -v
   - 请求体不合法：`400`
 
 - **POST `.../llm-config/test-call/`**
-  - body：`config_id`、`prompt`、可选 `max_tokens`（默认 512，最大 4096）
+  - body：`config_uuid`（推荐）或兼容 `config_id`、`prompt`（必填）、可选 `max_tokens`（默认 512，最大 4096）
   - 成功：`{ "ok": true, "content": "...", "usage": { ... } }`
   - 失败：`{ "ok": false, "detail": "..." }`
   - 调用会落到 usage 记录

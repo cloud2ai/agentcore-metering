@@ -31,7 +31,7 @@ The scenarios and requirements above are established first; the “core capabili
 
 ### 3.2 Configuration and usage are separate
 
-- **Configuration**: LLM model, API, parameters, etc. are managed by a “config catalog” (global default + optional per-user overrides). Resolution order: user scope → global scope → Django settings fallback.
+- **Configuration**: LLM model, API, parameters, etc. are managed by a “config catalog” (global default + optional per-user overrides). Resolution order: user scope → global scope; DB only, no settings fallback.
 - **Usage**: Each call produces one usage record (tokens, cost, model, user, etc.) for statistics and cost analysis; configuration and usage are not mixed in the same table or responsibility.
 
 ### 3.3 Cost and currency
@@ -51,7 +51,7 @@ The scenarios and requirements above are established first; the “core capabili
 | Capability | Description |
 |------------|-------------|
 | **1. LLM invocation and tracking** | `LLMTracker.call_and_track(...)`: uses LiteLLM for completion and persists usage (tokens, cost, model, user, etc.); optional `state` (e.g. `user_id`) for per-user config. |
-| **2. Config catalog** | Global default + per-user overrides; CRUD via a **unified config entry** (management API); sensitive data (e.g. API keys) live in the database, **not in env vars**; resolution takes the first active config by `order` (user → global → settings). |
+| **2. Config catalog** | Global default + per-user overrides; CRUD via a **unified config entry** (management API); sensitive data (e.g. API keys) live in the database, **not in env vars**; resolution is from DB only (user → global), no settings fallback. |
 | **3. Usage records and statistics** | Each call writes to `LLMUsage`; APIs for time/model/user aggregation and paginated lists (e.g. token-stats, llm-usage). |
 | **4. Multiple providers and models** | LiteLLM supports multiple providers; each can configure default model, `api_base`, etc.; cost is estimated from LiteLLM reference pricing. |
 

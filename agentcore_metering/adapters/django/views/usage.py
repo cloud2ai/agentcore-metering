@@ -1,3 +1,9 @@
+"""
+Admin API views for LLM usage list and token statistics.
+
+Read-only; requires IsAdminUser. Used by management UI for usage log and
+cost/summary stats.
+"""
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import status

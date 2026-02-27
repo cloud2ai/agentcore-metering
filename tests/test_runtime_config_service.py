@@ -47,7 +47,6 @@ class TestRuntimeConfigService:
             provider="openai",
             config={"api_key": "global-key", "model": "gpt-4o-mini"},
             is_active=True,
-            order=0,
         )
         LLMConfig.objects.create(
             scope=LLMConfig.Scope.USER,
@@ -56,7 +55,6 @@ class TestRuntimeConfigService:
             provider="openai",
             config={"api_key": "user-key", "model": "gpt-4o-mini"},
             is_active=True,
-            order=0,
         )
 
         with override_settings(
@@ -76,7 +74,6 @@ class TestRuntimeConfigService:
             provider="openai",
             config={"api_key": "global-key", "model": "gpt-4o-mini"},
             is_active=True,
-            order=0,
         )
 
         params = rc.get_litellm_params(user_id=99999)
@@ -99,7 +96,6 @@ class TestRuntimeConfigService:
             provider="openai",
             config={"api_key": "user-key", "model": "gpt-4o-mini"},
             is_active=True,
-            order=0,
         )
         LLMConfig.objects.create(
             scope=LLMConfig.Scope.GLOBAL,
@@ -108,7 +104,6 @@ class TestRuntimeConfigService:
             provider="openai",
             config={"api_key": "global-key", "model": "gpt-4o-mini"},
             is_active=True,
-            order=0,
         )
 
         params = rc.get_litellm_params()
@@ -116,17 +111,54 @@ class TestRuntimeConfigService:
         assert params["api_key"] == "global-key"
         assert params["model"] == "gpt-4o-mini"
 
-    @override_settings(
-        LLM_PROVIDER="dashscope",
-        DASHSCOPE_CONFIG={"api_key": "dashscope-key"},
-    )
-    def test_get_litellm_params_uses_settings_fallback_and_default_model(self):
-        params = rc.get_litellm_params()
+    def test_get_litellm_params_with_model_uuid_uses_that_config(
+        self, django_user_model
+    ):
+        user = django_user_model.objects.create_user(
+            username="u_uuid",
+            email="u_uuid@example.com",
+            password="pass",
+        )
+        cfg_global = LLMConfig.objects.create(
+            scope=LLMConfig.Scope.GLOBAL,
+            user=None,
+            model_type=LLMConfig.MODEL_TYPE_LLM,
+            provider="openai",
+            config={"api_key": "global-key", "model": "gpt-4o-mini"},
+            is_active=True,
+        )
+        cfg_user = LLMConfig.objects.create(
+            scope=LLMConfig.Scope.USER,
+            user=user,
+            model_type=LLMConfig.MODEL_TYPE_LLM,
+            provider="openai",
+            config={"api_key": "user-key", "model": "gpt-4o-mini"},
+            is_active=True,
+        )
 
-        assert params["api_key"] == "dashscope-key"
-        assert params["model"] == "dashscope/qwen-turbo"
-        assert "api_base" in params
-        assert params["api_base"]
+        params_by_uuid = rc.get_litellm_params(
+            user_id=user.id, model_uuid=str(cfg_global.uuid)
+        )
+        assert params_by_uuid["api_key"] == "global-key"
+
+        params_user_uuid = rc.get_litellm_params(
+            user_id=user.id, model_uuid=str(cfg_user.uuid)
+        )
+        assert params_user_uuid["api_key"] == "user-key"
+
+    def test_get_litellm_params_invalid_model_uuid_raises_no_fallback(self):
+        with pytest.raises(ValueError) as exc_info:
+            rc.get_litellm_params(
+                model_uuid="00000000-0000-0000-0000-000000000000",
+            )
+        msg = str(exc_info.value)
+        assert "model_uuid" in msg or "not found" in msg.lower()
+
+    def test_get_litellm_params_no_db_config_raises(self):
+        with pytest.raises(ValueError) as exc_info:
+            rc.get_litellm_params()
+        msg = str(exc_info.value)
+        assert "No LLM config" in msg or "admin" in msg.lower()
 
     def test_build_litellm_params_preserves_explicit_zero_values(self):
         params = rc.build_litellm_params_from_config(
@@ -226,7 +258,6 @@ class TestRuntimeConfigService:
             provider="openai",
             config={"api_key": "k", "model": "gpt-4o-mini"},
             is_active=True,
-            order=0,
         )
         response = _mock_completion_response(content="hello")
         monkeypatch.setattr(
@@ -270,7 +301,6 @@ class TestRuntimeConfigService:
             provider="openai",
             config={"api_key": "k", "model": "gpt-4o-mini"},
             is_active=True,
-            order=0,
         )
         message = SimpleNamespace(content="hello")
         choice = SimpleNamespace(message=message)
@@ -328,7 +358,6 @@ class TestRuntimeConfigService:
             provider="openai",
             config={"api_key": "k", "model": "gpt-4o-mini"},
             is_active=True,
-            order=0,
         )
         response = _mock_completion_response(content="hello")
         monkeypatch.setattr(
@@ -369,7 +398,6 @@ class TestRuntimeConfigService:
             provider="openai",
             config={"api_key": "k", "model": "gpt-4o-mini"},
             is_active=True,
-            order=0,
         )
         response = _mock_completion_response(content="")
         monkeypatch.setattr(
@@ -403,7 +431,6 @@ class TestRuntimeConfigService:
             provider="openai",
             config={"api_key": "k", "model": "gpt-4o-mini"},
             is_active=True,
-            order=0,
         )
         message = SimpleNamespace(
             role="assistant",

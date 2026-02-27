@@ -95,10 +95,18 @@ class LLMUsage(models.Model):
         ),
     )
 
+    started_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text=(
+            "When the LLM request started (t_start). Used for E2E latency."
+        ),
+    )
     created_at = models.DateTimeField(
         auto_now_add=True,
         db_index=True,
-        help_text="Timestamp when this LLM call was made",
+        help_text="When the record was saved after call completed (t_end).",
     )
 
     class Meta:
@@ -129,8 +137,8 @@ class LLMConfig(models.Model):
 
     Each row is one model config (provider + credentials). model_type aligns
     with LiteLLM: completion (llm), embedding, image_generation.
-    is_active and order control which configs are used; resolver uses
-    first by order.
+    is_active controls whether the config is used. Default resolution
+    uses the earliest enabled config by created_at.
     """
 
     class Scope(models.TextChoices):
@@ -191,10 +199,14 @@ class LLMConfig(models.Model):
         db_index=True,
         help_text="If false, this config is not used when resolving.",
     )
-    order = models.PositiveSmallIntegerField(
-        default=0,
+    is_default = models.BooleanField(
+        default=False,
         db_index=True,
-        help_text="Order for picking config (first active by order).",
+        help_text=(
+            "If true, this global config is used when model_uuid is not set. "
+            "Only one global LLM config should be default; setting one clears "
+            "others. Ignored for user-scope configs."
+        ),
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -203,7 +215,7 @@ class LLMConfig(models.Model):
         db_table = "agentcore_metering_llm_config"
         verbose_name = _("LLM Config")
         verbose_name_plural = _("LLM Configs")
-        ordering = ["order", "id"]
+        ordering = ["created_at", "id"]
 
     def __str__(self) -> str:
         if self.scope == self.Scope.GLOBAL:

@@ -62,10 +62,10 @@ pytest tests -v
    )
    ```
    - `state` is optional (task/user context).
-   - If `state` contains `user_id`, per-user LLM config (if set) is used.
+   - If `state` contains `user_id`, per-user LLM config (if set) is used. Pass `model_uuid` to use a specific config; otherwise the earliest enabled model is used.
 3. **Config**
    - All config can be managed by admin APIs (global defaults + optional per-user overrides).
-   - DB resolution picks the first active config by `order`: user scope -> global scope -> Django `settings` fallback.
+   - When model_uuid is not provided, resolution uses the earliest enabled config (by is_default then created_at): user scope -> global scope; no settings fallback, raises if no DB config.
    - LLM calls go through **LiteLLM**.
    - Cost (USD) is estimated from LiteLLM reference pricing and stored per call and in stats.
 
@@ -98,11 +98,7 @@ pytest tests -v
 | `volcengine`    | doubao-pro-32k (ByteDance Doubao) |
 | `openrouter`    | google/gemma-2-9b-it:free |
 
-- Settings fallback:
-  - set `LLM_PROVIDER` and matching config key (e.g. `OPENAI_CONFIG`, `ANTHROPIC_CONFIG`)
-  - each config dict should include at least `api_key`
-  - all providers accept optional `api_base` (official by default, proxy when needed)
-  - Azure requires `api_base` and typically `deployment`
+- Config is from DB only (admin API); no Django settings fallback. At least one enabled global or user config is required for calls.
 
 ---
 
@@ -117,8 +113,8 @@ pytest tests -v
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `.../llm-config/` | List global LLM configs (ordered by `order`, `id`) |
-| POST | `.../llm-config/` | Create one config. Body: `provider`, `config` (optional `scope`, `user_id`, `is_active`, `order`) |
+| GET | `.../llm-config/` | List global LLM configs (ordered by created_at, id) |
+| POST | `.../llm-config/` | Create one config. Body: `provider`, `config` (optional `scope`, `user_id`, `is_active`) |
 | GET | `.../llm-config/all/` | List all LLM configs (global + user). Optional `scope=all|global|user`, `user_id` |
 | GET | `.../llm-config/<pk>/` | Get one config by id |
 | PUT | `.../llm-config/<pk>/` | Update one config by id |
@@ -126,22 +122,22 @@ pytest tests -v
 | GET | `.../llm-config/providers/` | Per-provider param schema (required/optional/editable keys, default model and api_base) for building provider-specific forms |
 | GET | `.../llm-config/models/` | Provider list and model list with capability tags (text-to-text / vision / code / reasoning, etc.) |
 | POST | `.../llm-config/test/` | Validate credentials without saving. Body: `provider`, `config` |
-| POST | `.../llm-config/test-call/` | Run one synchronous completion by saved config id and persist usage. Body: `config_id`, `prompt`, optional `max_tokens` |
+| POST | `.../llm-config/test-call/` | Run one synchronous completion and persist usage. Body: `config_uuid` (or legacy `config_id`), `prompt`, optional `max_tokens` |
 | GET | `.../llm-config/users/` | List per-user configs (optional `?user_id=` filter) |
 | GET | `.../llm-config/users/<user_id>/` | Get one user's config (404 if not set) |
 | PUT | `.../llm-config/users/<user_id>/` | Create or update that user's config |
-| DELETE | `.../llm-config/users/<user_id>/` | Remove user config (they fall back to global/settings) |
+| DELETE | `.../llm-config/users/<user_id>/` | Remove user config (they fall back to global default) |
 
 - **POST/PUT body**
   - `provider` (default `openai`)
   - `config` (single JSON object, e.g. `api_key`, `model`, `api_base`,
     `deployment`, `max_tokens`, `temperature`, `top_p`)
   - for create/list workflows: optional `scope`, `user_id`, `is_active`,
-    `order`, optional `model_type`
+    optional `model_type`
   - required/optional keys differ by provider (e.g. Azure needs
     `api_base` and `deployment`)
   - use `GET .../llm-config/providers/` to fetch schema
-  - on GET, `config.api_key` and `config.key` are masked (e.g. `sk-**xxxx`)
+  - on GET, `config.api_key` and `config.key` are masked (e.g. `sk-**xxxx`); `is_default` is true when this config is the current default (earliest enabled global config used when model_uuid is not set), so the frontend can highlight the default model.
 
 - **GET `.../llm-config/providers/`**
   - returns `{ "providers": { "<provider>": { "required": [...], "optional": [...], "editable_params": [...], "default_model": "...", "default_api_base": "..." } } }`
@@ -155,7 +151,7 @@ pytest tests -v
   - invalid payload: `400`
 
 - **POST `.../llm-config/test-call/`**
-  - body: `config_id`, `prompt`, optional `max_tokens` (default 512, max 4096)
+  - body: `config_uuid` (preferred) or legacy `config_id`, `prompt`, optional `max_tokens` (default 512, max 4096)
   - success: `{ "ok": true, "content": "...", "usage": { ... } }`
   - failure: `{ "ok": false, "detail": "..." }`
   - call is persisted to usage records

@@ -1,7 +1,8 @@
 """
-LLM call params from DB (global/per-user) or Django settings for LiteLLM.
+LLM call params from DB (global/per-user) for LiteLLM.
 
-Resolution: DB user config -> DB global config -> settings.
+Resolution: DB user config -> DB global config. No settings fallback;
+config must exist in DB (managed via admin API).
 Returns dict of kwargs for litellm.completion(
     model=..., messages=..., **kwargs).
 All providers support api_base (URL). Use official default when not set.
@@ -13,17 +14,20 @@ import logging
 from decimal import Decimal
 from typing import Any, Dict, Optional, Tuple
 
-from django.conf import settings
+from django.utils import timezone
 from django.utils.translation import activate, gettext as _
 import litellm
 from litellm import completion_cost
 
-from agentcore_metering.adapters.django.llm_static.load import (
-    get_provider_defaults,
-)
 from agentcore_metering.adapters.django.models import LLMConfig, LLMUsage
 from agentcore_metering.adapters.django.services.config_source import (
     get_config_from_db,
+)
+from agentcore_metering.adapters.django.services.litellm_params import (
+    _litellm_kwargs_from_config,
+    _validate_config,
+    build_litellm_params_from_config,
+    get_provider_params_schema,
 )
 from agentcore_metering.adapters.django.utils import (
     _read_field,
@@ -32,9 +36,6 @@ from agentcore_metering.adapters.django.utils import (
 )
 from agentcore_metering.constants import (
     DEFAULT_COST_CURRENCY,
-    DEFAULT_MAX_TOKENS,
-    DEFAULT_TEMPERATURE,
-    DEFAULT_TOP_P,
     TEST_MAX_TOKENS,
 )
 
@@ -42,147 +43,6 @@ logger = logging.getLogger(__name__)
 
 TASK_VALIDATE_LLM_CONFIG = "validate_llm_config"
 TASK_RUN_TEST_CALL = "run_test_call"
-
-# Build from YAML (llm_static/providers/*.yaml). All provider defaults live
-# in YAML; see providers/index.yaml and providers/*.yaml.
-_yaml_defaults = get_provider_defaults()
-OFFICIAL_API_BASES: Dict[str, Optional[str]] = {
-    p: d.get("default_api_base") for p, d in _yaml_defaults.items()
-}
-DEFAULT_MODELS: Dict[str, str] = {
-    p: d.get("default_model")
-    for p, d in _yaml_defaults.items()
-    if d.get("default_model")
-}
-PROVIDER_SETTINGS_KEYS: Dict[str, str] = {
-    p: d.get("settings_key")
-    for p, d in _yaml_defaults.items()
-    if d.get("settings_key")
-}
-PROVIDERS_REQUIRING_API_BASE = frozenset(
-    p for p, d in _yaml_defaults.items() if d.get("requires_api_base")
-)
-
-# Provider model string and parameter builders.
-
-
-def _model_string(provider: str, config: dict) -> str:
-    """
-    Build LiteLLM model string. Default to each platform's smallest/cheapest
-    model to avoid cost from misconfiguration.
-    """
-    provider = (provider or "openai").strip().lower()
-    model = (config.get("model") or "").strip() or DEFAULT_MODELS.get(
-        provider, "gpt-4o-mini"
-    )
-    # Azure uses deployment-based model routing in LiteLLM.
-    if provider == "azure_openai":
-        deployment = config.get("deployment") or model
-        return f"azure/{deployment}"
-    # Gemini may already include vendor prefix in model id.
-    if provider == "gemini":
-        return f"gemini/{model}" if "/" not in model else model
-    # Most providers require a "<provider>/<model>" model string.
-    # Keep pre-prefixed model id as-is except for nvidia_nim.
-    if provider in (
-        "anthropic",
-        "mistral",
-        "dashscope",
-        "deepseek",
-        "xai",
-        "meta_llama",
-        "amazon_nova",
-        "nvidia_nim",
-        "minimax",
-        "moonshot",
-        "zai",
-        "volcengine",
-        "openrouter",
-    ):
-        if "/" not in model or provider == "nvidia_nim":
-            return f"{provider}/{model}"
-        return model
-    return model
-
-
-def _litellm_kwargs_from_config(provider: str, config: dict) -> Dict[str, Any]:
-    provider = (provider or "openai").strip().lower()
-    config = config or {}
-    model = _model_string(provider, config)
-    api_base = (
-        (config.get("api_base") or "").strip()
-        or OFFICIAL_API_BASES.get(provider)
-    )
-    kwargs = {
-        "model": model,
-        "api_key": config.get("api_key") or None,
-        "api_base": api_base,
-    }
-    if provider == "azure_openai":
-        kwargs["api_version"] = config.get("api_version")
-    # Apply defaults only when the config value is missing (None).
-    # Explicit falsy values like 0 should be preserved.
-    defaults = (
-        ("max_tokens", DEFAULT_MAX_TOKENS),
-        ("temperature", DEFAULT_TEMPERATURE),
-        ("top_p", DEFAULT_TOP_P),
-    )
-    for key, default in defaults:
-        value = config.get(key)
-        kwargs[key] = default if value is None else value
-    kwargs["drop_params"] = True
-    return {k: v for k, v in kwargs.items() if v is not None}
-
-
-def _validate_config(provider: str, config: dict) -> None:
-    """Raise ValueError if required keys are missing for the provider."""
-    provider = (provider or "openai").strip().lower()
-    # Azure-compatible providers require api_base in addition to api_key.
-    if provider in PROVIDERS_REQUIRING_API_BASE:
-        if not config.get("api_key") or not config.get("api_base"):
-            raise ValueError(
-                "Azure OpenAI configuration is incomplete. "
-                "Set api_key and api_base."
-            )
-        return
-    if provider == "openrouter":
-        if not config.get("api_key"):
-            raise ValueError(
-                "OpenRouter configuration is incomplete. Set api_key."
-            )
-        return
-    if provider in DEFAULT_MODELS:
-        if not config.get("api_key"):
-            name = (
-                "OpenAI"
-                if provider == "openai"
-                else provider.replace("_", " ").title()
-            )
-            raise ValueError(
-                f"{name} configuration is incomplete. Set api_key."
-            )
-        return
-    if not config.get("api_key"):
-        raise ValueError(
-            f"Provider '{provider}' requires api_key in config."
-        )
-
-
-def build_litellm_params_from_config(
-    provider: str, config: dict
-) -> Dict[str, Any]:
-    """
-    Build litellm.completion() kwargs from given provider and config dict.
-    Same defaults as get_litellm_params. Use for validation without DB.
-
-    Raises:
-        ValueError: If required config (e.g. api_key) is missing.
-    """
-    provider = (provider or "openai").strip().lower()
-    config = config or {}
-    _validate_config(provider, config)
-    return _litellm_kwargs_from_config(provider, config)
-
 
 # Error keys for connection test; backend translates by request language.
 VALIDATION_ERROR_KEYS = (
@@ -335,8 +195,10 @@ def _extract_usage_from_response(response: Any, params: dict) -> Tuple[
         raw_cost = completion_cost(completion_response=response)
         if raw_cost is not None:
             cost = Decimal(str(raw_cost))
-    except Exception:
-        pass
+    except (TypeError, ValueError) as e:
+        logger.debug("completion_cost or Decimal failed: %s", e)
+    except Exception as e:
+        logger.debug("completion_cost failed: %s", e)
     return (
         actual_model, prompt_tokens, completion_tokens, total_tokens,
         cached_tokens, reasoning_tokens, cost,
@@ -403,9 +265,11 @@ def _create_usage_record(
     reasoning_tokens: int,
     cost: Optional[Decimal],
     metadata_node_name: str,
+    started_at: Optional[Any] = None,
 ) -> None:
     """
     Persist one usage record for runtime validation and test calls.
+    started_at: when the LLM request started (for E2E latency).
     """
     LLMUsage.objects.create(
         user=user,
@@ -420,6 +284,7 @@ def _create_usage_record(
         success=True,
         error=None,
         metadata={"node_name": metadata_node_name},
+        started_at=started_at,
     )
 
 
@@ -449,6 +314,7 @@ def validate_llm_config(
             f"has_api_key={bool(params.get('api_key'))} "
             f"api_base={params.get('api_base')}"
         )
+        request_started_at = timezone.now()
         response = litellm.completion(**params)
         logger.info(
             "LLM validate response "
@@ -483,6 +349,7 @@ def validate_llm_config(
                     reasoning_tokens=reasoning_tokens,
                     cost=cost,
                     metadata_node_name="config_test",
+                    started_at=request_started_at,
                 )
             except Exception as e:
                 uid = getattr(user, "pk", None)
@@ -524,15 +391,12 @@ def run_test_call(
     """
     Run one completion with the given LLMConfig and record to LLMUsage.
 
-    Uses the config identified by config_uuid (or legacy config_id).
-    Prompt is the user message.
+    Uses LLMTracker.call_and_track so test-call shares the same code path as
+    application calls (params resolution, completion, usage + started_at).
     Returns (ok, content_or_detail, usage_dict or None).
-    usage_dict has model, prompt_tokens, completion_tokens, total_tokens,
-    cached_tokens, reasoning_tokens, cost, cost_currency.
     """
     if not (prompt or "").strip():
         return False, "Prompt cannot be empty", None
-    # Keep max_tokens in a safe range for admin test call.
     max_tokens = min(max(1, max_tokens), 4096)
     llm_config = None
     if config_uuid:
@@ -548,224 +412,71 @@ def run_test_call(
     if llm_config is None:
         return False, "Config not found", None
 
+    # NOTE(Ray): Import here to avoid circular import; trackers.llm imports
+    # get_litellm_params from this module.
+    from agentcore_metering.adapters.django.trackers.llm import LLMTracker
+
     config_uuid_value = str(getattr(llm_config, "uuid", "") or "")
     config_id_value = getattr(llm_config, "id", None)
     logger.info(
         f"Starting {TASK_RUN_TEST_CALL} "
         f"config_uuid={config_uuid_value} config_id={config_id_value}"
     )
-    provider = (llm_config.provider or "openai").strip().lower()
-    config = llm_config.config or {}
-    user_id = getattr(user, "pk", None)
+    messages = [{"role": "user", "content": (prompt or "").strip()}]
+    state = {"node_name": "admin_test_call"}
+    if user is not None:
+        state["user_id"] = getattr(user, "pk", None)
+
     try:
-        params = build_litellm_params_from_config(provider, config)
+        content, usage = LLMTracker.call_and_track(
+            messages=messages,
+            max_tokens=max_tokens,
+            state=state,
+            model_uuid=config_uuid_value,
+        )
     except ValueError as e:
+        msg = str(e).strip().lower()
+        if "empty response" in msg or "no response" in msg:
+            return False, "LLM returned empty response", None
         return False, str(e), None
-    params["messages"] = [{"role": "user", "content": (prompt or "").strip()}]
-    params["max_tokens"] = max_tokens
-    logger.info(
-        "LLM test-call request "
-        f"config_uuid={config_uuid_value} config_id={config_id_value} "
-        f"user_id={user_id} provider={provider} "
-        f"model={params.get('model')} "
-        f"max_tokens={params.get('max_tokens')} "
-        f"prompt_len={len((prompt or '').strip())} "
-        f"has_api_key={bool(params.get('api_key'))} "
-        f"api_base={params.get('api_base')}"
-    )
-    try:
-        response = litellm.completion(**params)
     except Exception as e:
         error_key = _user_friendly_validation_error(e)
         logger.warning(
             "LLM test-call failed "
             f"config_uuid={config_uuid_value} config_id={config_id_value} "
-            f"user_id={user_id} provider={provider} "
-            f"error_key={error_key} error={str(e)}"
-        )
-        logger.debug(
-            f"Test call failed config_uuid={config_uuid_value}: {e}",
+            f"error_key={error_key} error={e}",
             exc_info=True,
         )
         return False, error_key, None
 
-    if response is None:
-        logger.warning(
-            "LLM test-call empty response object "
-            f"config_uuid={config_uuid_value} config_id={config_id_value} "
-            f"user_id={user_id}"
-        )
-        return False, "LLM returned no response", None
-
-    choices = response.choices or []
-    choice = choices[0] if choices else None
-    finish_reason = getattr(choice, "finish_reason", None) if choice else None
-    has_message = bool(choice and getattr(choice, "message", None))
-    logger.info(
-        "LLM test-call response "
-        f"config_uuid={config_uuid_value} config_id={config_id_value} "
-        f"user_id={user_id} choices={len(choices)} "
-        f"finish_reason={finish_reason} has_message={has_message}"
-    )
-    if not choice or not getattr(choice, "message", None):
-        snapshot = _response_debug_snapshot(
-            response=response,
-            choice=choice,
-            message=None,
-            content=None,
-        )
-        logger.warning(
-            "LLM test-call missing message "
-            f"config_uuid={config_uuid_value} config_id={config_id_value} "
-            f"user_id={user_id} "
-            f"finish_reason={finish_reason} "
-            f"response_id={snapshot['response_id']} "
-            f"request_id={snapshot['request_id']}"
-        )
-        return False, "LLM returned empty response", None
-    msg = choice.message
-    content = getattr(msg, "content", None) or ""
-
-    (
-        actual_model, prompt_tokens, completion_tokens, total_tokens,
-        cached_tokens, reasoning_tokens, cost,
-    ) = _extract_usage_from_response(response, params)
-    content_str = str(content).strip()
-    logger.info(
-        "LLM test-call usage "
-        f"config_uuid={config_uuid_value} config_id={config_id_value} "
-        f"user_id={user_id} model={actual_model} "
-        f"prompt_tokens={prompt_tokens} "
-        f"completion_tokens={completion_tokens} "
-        f"total_tokens={total_tokens}"
-    )
-    if not content_str:
-        snapshot = _response_debug_snapshot(
-            response=response,
-            choice=choice,
-            message=msg,
-            content=content,
-        )
-        logger.warning(
-            "LLM test-call empty content "
-            f"config_uuid={config_uuid_value} config_id={config_id_value} "
-            f"user_id={user_id} model={actual_model} "
-            f"finish_reason={snapshot['finish_reason']} "
-            f"total_tokens={total_tokens} "
-            f"response_id={snapshot['response_id']} "
-            f"request_id={snapshot['request_id']} "
-            f"message_role={snapshot['message_role']} "
-            f"tool_call_count={snapshot['tool_call_count']} "
-            f"has_refusal={snapshot['has_refusal']} "
-            f"content_type={snapshot['content_type']} "
-            f"content_preview={snapshot['content_preview']}"
-        )
-        return False, "LLM returned empty response", None
-    else:
-        logger.info(
-            "LLM test-call content "
-            f"config_uuid={config_uuid_value} config_id={config_id_value} "
-            f"user_id={user_id} "
-            f"content_len={len(content_str)}"
-        )
-
-    try:
-        _create_usage_record(
-            user=user,
-            actual_model=actual_model,
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            total_tokens=total_tokens,
-            cached_tokens=cached_tokens,
-            reasoning_tokens=reasoning_tokens,
-            cost=cost,
-            metadata_node_name="admin_test_call",
-        )
-    except Exception as e:
-        uid = getattr(user, "pk", None)
-        logger.warning(
-            f"Failed to record test-call usage; user={uid}, "
-            f"model={actual_model}, error={e}",
-            exc_info=True,
-        )
-
+    cost = usage.get("cost")
     usage_dict = {
-        "model": actual_model,
-        "prompt_tokens": prompt_tokens,
-        "completion_tokens": completion_tokens,
-        "total_tokens": total_tokens,
-        "cached_tokens": cached_tokens,
-        "reasoning_tokens": reasoning_tokens,
+        "model": usage.get("model", ""),
+        "prompt_tokens": usage.get("prompt_tokens", 0),
+        "completion_tokens": usage.get("completion_tokens", 0),
+        "total_tokens": usage.get("total_tokens", 0),
+        "cached_tokens": usage.get("cached_tokens", 0),
+        "reasoning_tokens": usage.get("reasoning_tokens", 0),
         "cost": float(cost) if cost is not None else None,
-        "cost_currency": DEFAULT_COST_CURRENCY,
+        "cost_currency": usage.get("cost_currency", DEFAULT_COST_CURRENCY),
     }
     logger.info(
         f"Finished {TASK_RUN_TEST_CALL} "
         f"config_uuid={config_uuid_value} config_id={config_id_value}"
     )
-    return True, content_str, usage_dict
+    return True, content, usage_dict
 
 
-def get_provider_params_schema() -> Dict[str, Any]:
+def get_litellm_params(
+    user_id: Optional[int] = None,
+    model_uuid: Optional[str] = None,
+) -> Dict[str, Any]:
     """
-    Per-provider param metadata for UI: required keys, optional keys,
-    default model and default api_base. api_base is first in optional
-    so UI can show it at top. editable_params lists all configurable keys.
-    """
-    optional_common = [
-        "api_base",
-        "model",
-        "max_tokens",
-        "temperature",
-        "top_p",
-    ]
-    editable_common = [
-        "api_base",
-        "api_key",
-        "model",
-        "max_tokens",
-        "temperature",
-        "top_p",
-    ]
-    providers = {}
-    for p in DEFAULT_MODELS:
-        required = ["api_key"]
-        if p == "azure_openai":
-            required = ["api_key", "api_base", "deployment"]
-            optional = [
-                "api_base",
-                "model",
-                "api_version",
-                "max_tokens",
-                "temperature",
-                "top_p",
-            ]
-            editable = [
-                "api_base",
-                "api_key",
-                "deployment",
-                "model",
-                "api_version",
-                "max_tokens",
-                "temperature",
-                "top_p",
-            ]
-        else:
-            optional = optional_common.copy()
-            editable = editable_common.copy()
-        providers[p] = {
-            "required": required,
-            "optional": optional,
-            "editable_params": editable,
-            "default_model": DEFAULT_MODELS.get(p),
-            "default_api_base": OFFICIAL_API_BASES.get(p),
-        }
-    return {"providers": providers}
+    Build litellm.completion() kwargs from DB only.
 
-
-def get_litellm_params(user_id: Optional[int] = None) -> Dict[str, Any]:
-    """
-    Build litellm.completion() kwargs from DB or settings.
+    When model_uuid is provided, uses that LLM config (by uuid). Otherwise
+    uses the earliest enabled LLM config (user scope then global). No
+    settings fallback; config must exist in DB.
 
     Returns:
         Dict with "model", "max_tokens", "temperature", "top_p" (defaults
@@ -773,9 +484,10 @@ def get_litellm_params(user_id: Optional[int] = None) -> Dict[str, Any]:
         Pass to litellm.completion(..., **params).
 
     Raises:
-        ValueError: If required config (e.g. api_key) is missing.
+        ValueError: If no config in DB or required config (e.g. api_key)
+        is missing.
     """
-    cfg = get_config_from_db(user_id=user_id)
+    cfg = get_config_from_db(user_id=user_id, model_uuid=model_uuid)
 
     if cfg is not None:
         provider = cfg["provider"]
@@ -783,8 +495,14 @@ def get_litellm_params(user_id: Optional[int] = None) -> Dict[str, Any]:
         _validate_config(provider, config)
         return _litellm_kwargs_from_config(provider, config)
 
-    provider = getattr(settings, "LLM_PROVIDER", "openai").strip().lower()
-    settings_key = PROVIDER_SETTINGS_KEYS.get(provider, "OPENAI_CONFIG")
-    config = dict(getattr(settings, settings_key, {}))
-    _validate_config(provider, config)
-    return _litellm_kwargs_from_config(provider, config)
+    if model_uuid is not None:
+        raise ValueError(
+            "LLM config not found or not usable for "
+            f"model_uuid={model_uuid!r}. "
+            "Check uuid, is_active=True, and model_type=llm.",
+        )
+
+    raise ValueError(
+        "No LLM config found in DB. Add a global or user config via the "
+        "admin API (e.g. .../llm-config/)."
+    )

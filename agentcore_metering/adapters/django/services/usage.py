@@ -68,10 +68,20 @@ def get_llm_usage_list(
     items: List[Dict[str, Any]] = []
     for u in usages:
         created_at = u.created_at.isoformat() if u.created_at else None
+        started_at = u.started_at.isoformat() if u.started_at else None
         username = u.user.username if u.user else None
         cost = None
         if u.cost is not None:
             cost = float(u.cost)
+        e2e_latency_sec = None
+        output_tps = None
+        if u.started_at and u.created_at:
+            delta = u.created_at - u.started_at
+            e2e_latency_sec = max(0.0, delta.total_seconds())
+            if e2e_latency_sec > 0 and u.completion_tokens is not None:
+                output_tps = round(
+                    float(u.completion_tokens) / e2e_latency_sec, 2
+                )
         items.append({
             "id": str(u.id),
             "user_id": u.user_id,
@@ -85,6 +95,9 @@ def get_llm_usage_list(
             "success": u.success,
             "error": u.error,
             "created_at": created_at,
+            "started_at": started_at,
+            "e2e_latency_sec": e2e_latency_sec,
+            "output_tps": output_tps,
             "metadata": u.metadata,
         })
 
