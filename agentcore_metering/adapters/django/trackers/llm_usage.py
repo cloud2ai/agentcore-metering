@@ -31,7 +31,7 @@ def token_count_text(model: str, text: str) -> int:
     try:
         return int(token_counter(model=model, text=text))
     except Exception as e:
-        logger.debug("token_counter(model=%r, text=...) failed: %s", model, e)
+        logger.debug(f"token_counter(model={model!r}, text=...) failed: {e}")
         return 0
 
 
@@ -46,7 +46,7 @@ def token_count_messages(model: str, messages: list) -> int:
         return int(token_counter(model=model, messages=messages))
     except Exception as e:
         logger.debug(
-            "token_counter(model=%r, messages=...) failed: %s", model, e
+            f"token_counter(model={model!r}, messages=...) failed: {e}"
         )
         return 0
 
@@ -61,9 +61,9 @@ def get_cost_from_response(response: Any) -> Optional[Decimal]:
         if cost is not None:
             return Decimal(str(cost))
     except (TypeError, ValueError) as e:
-        logger.debug("completion_cost or Decimal failed: %s", e)
+        logger.debug(f"completion_cost or Decimal failed: {e}")
     except Exception as e:
-        logger.debug("completion_cost failed: %s", e)
+        logger.debug(f"completion_cost failed: {e}")
     hidden = getattr(response, "_hidden_params", None) or {}
     cost = hidden.get("response_cost")
     if cost is not None:

@@ -24,7 +24,7 @@ def get_global_config(key: str) -> Optional[Any]:
             return None
         return row.value
     except Exception as e:
-        logger.debug("get_global_config %s: %s", key, e)
+        logger.debug(f"get_global_config {key}: {e}")
         return None
 
 

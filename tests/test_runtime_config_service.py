@@ -264,7 +264,8 @@ class TestRuntimeConfigService:
             rc.litellm, "completion", lambda **kwargs: response
         )
         monkeypatch.setattr(
-            "agentcore_metering.adapters.django.trackers.llm_usage.completion_cost",
+            "agentcore_metering.adapters.django.trackers.llm_usage."
+            "completion_cost",
             lambda completion_response: 0.5,
         )
 
@@ -319,7 +320,8 @@ class TestRuntimeConfigService:
             rc.litellm, "completion", lambda **kwargs: response
         )
         monkeypatch.setattr(
-            "agentcore_metering.adapters.django.trackers.llm_usage.completion_cost",
+            "agentcore_metering.adapters.django.trackers.llm_usage."
+            "completion_cost",
             lambda completion_response: 0.5,
         )
 
@@ -362,7 +364,8 @@ class TestRuntimeConfigService:
             rc.litellm, "completion", lambda **kwargs: response
         )
         monkeypatch.setattr(
-            "agentcore_metering.adapters.django.trackers.llm_usage.completion_cost",
+            "agentcore_metering.adapters.django.trackers.llm_usage."
+            "completion_cost",
             lambda completion_response: 0.5,
         )
         caplog.set_level(logging.INFO, logger=rc.logger.name)

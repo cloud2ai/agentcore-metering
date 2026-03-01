@@ -184,7 +184,8 @@ class TestGetLlmUsageListFromQuery:
 @pytest.mark.django_db
 class TestLLMUsageStreamingFields:
     """
-    LLMUsage is_streaming and first_chunk_at; list returns ttft_sec and latency_sec.
+    LLMUsage is_streaming and first_chunk_at; list returns ttft_sec,
+    latency_sec.
     """
 
     def test_usage_created_with_is_streaming_and_first_chunk_at(

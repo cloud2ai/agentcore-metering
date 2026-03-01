@@ -184,9 +184,9 @@ def _extract_usage_from_response(response: Any, params: dict) -> Tuple[
         if raw_cost is not None:
             cost = Decimal(str(raw_cost))
     except (TypeError, ValueError) as e:
-        logger.debug("completion_cost or Decimal failed: %s", e)
+        logger.debug(f"completion_cost or Decimal failed: {e}")
     except Exception as e:
-        logger.debug("completion_cost failed: %s", e)
+        logger.debug(f"completion_cost failed: {e}")
     return (
         actual_model, prompt_tokens, completion_tokens, total_tokens,
         cached_tokens, reasoning_tokens, cost,

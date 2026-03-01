@@ -167,7 +167,7 @@ def aggregate_llm_usage_series_task(
             ):
                 n = _run_one_granularity(gran)
                 total += n
-                logger.info("aggregate granularity=%s upserted=%s", gran, n)
+                logger.info(f"aggregate granularity={gran} upserted={n}")
             out = {"upserted": total, "granularity": "all"}
             TaskTracker.update_task_status(
                 task_id, TaskStatus.SUCCESS, result=out

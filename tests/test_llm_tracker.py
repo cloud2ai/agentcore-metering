@@ -277,7 +277,11 @@ class TestCallAndTrackTokenFallback:
         "agentcore_metering.adapters.django.trackers.llm_usage.token_counter"
     )
     def test_sync_fallback_guards_min_completion_token_when_token_counter_fails(
-        self, mock_token_counter, mock_params, mock_litellm, mock_save_usage
+        self,
+        mock_token_counter,
+        mock_params,
+        mock_litellm,
+        mock_save_usage,
     ):
         def _side_effect(
             *,
@@ -344,7 +348,9 @@ class TestCallAndTrackStreaming:
             total_tokens=3,
         )
         chunk1 = SimpleNamespace(choices=[choice1], usage=None, model="gpt-4")
-        chunk2 = SimpleNamespace(choices=[choice2], usage=usage_ns, model="gpt-4")
+        chunk2 = SimpleNamespace(
+            choices=[choice2], usage=usage_ns, model="gpt-4"
+        )
         mock_litellm.completion.return_value = iter([chunk1, chunk2])
 
         gen = LLMTracker.call_and_track(
