@@ -1,12 +1,14 @@
 """
-Tests for llm_usage_stats: _parse_date, get_summary_stats, by_model, series.
+Tests for usage_aggregation: _parse_date, get_summary_stats, by_model, series.
 """
-from datetime import datetime
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 import pytest
 from django.utils import timezone as django_tz
 
-from agentcore_metering.adapters.django.services.usage_stats import (
+from agentcore_metering.adapters.django.services.usage_aggregation import (
+    _bucket_key_for_fill,
     _parse_date,
     _parse_end_date,
     get_stats_by_model,
@@ -46,6 +48,39 @@ class TestParseEndDate:
         assert out is not None
         assert out.hour == 23
         assert out.minute == 59
+
+
+@pytest.mark.unit
+class TestBucketKeyForFill:
+    """
+    _bucket_key_for_fill normalizes bucket to a string key so DB and expected
+    buckets match (naive/aware, date/datetime).
+    """
+
+    def test_returns_none_for_none(self):
+        assert _bucket_key_for_fill(None, "day") is None
+        assert _bucket_key_for_fill(None, "month") is None
+        assert _bucket_key_for_fill(None, "year") is None
+
+    def test_day_granularity_normalizes_datetime(self):
+        dt = datetime(2026, 2, 21, 3, 0, 0)
+        key = _bucket_key_for_fill(dt, "day")
+        assert key is not None
+        assert "2026-02-21" in key
+        assert "03:00:00" in key
+
+    def test_month_granularity_uses_date_iso(self):
+        d = date(2026, 2, 21)
+        assert _bucket_key_for_fill(d, "month") == "2026-02-21"
+        dt = datetime(2026, 2, 21, 15, 30, 0)
+        assert _bucket_key_for_fill(dt, "month") == "2026-02-21"
+
+    def test_year_granularity_normalizes_to_first_of_month(self):
+        dt = datetime(2026, 3, 7, 10, 0, 0)
+        key = _bucket_key_for_fill(dt, "year")
+        assert key is not None
+        assert "2026-03-01" in key
+        assert "00:00:00" in key or "00:00" in key
 
 
 @pytest.mark.unit
@@ -146,6 +181,28 @@ class TestGetTimeSeriesStats:
         assert len(items) == 12
         assert sum(i["total_tokens"] for i in items) == 9
         assert sum(1 for i in items if i["total_tokens"] > 0) == 1
+
+    def test_year_granularity_returns_twelve_months_when_end_in_non_utc(self):
+        """
+        When end_date is last second of year in a timezone ahead of UTC,
+        converting to UTC would be next year; we must still return 12 months
+        (Jan–Dec of that calendar year).
+        """
+        start = datetime(2026, 1, 1, 0, 0, 0, tzinfo=ZoneInfo("UTC"))
+        end = datetime(
+            2026, 12, 31, 23, 59, 59,
+            tzinfo=ZoneInfo("America/Los_Angeles"),
+        )
+
+        items = get_time_series_stats(
+            granularity="year",
+            start_date=start,
+            end_date=end,
+        )
+
+        assert len(items) == 12
+        assert items[0]["bucket"].startswith("2026-01")
+        assert items[-1]["bucket"].startswith("2026-12")
 
 
 @pytest.mark.unit

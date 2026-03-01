@@ -12,7 +12,7 @@ OpenRouter.
 """
 import logging
 from decimal import Decimal
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Generator, Optional, Tuple
 
 from django.utils import timezone
 from django.utils.translation import activate, gettext as _
@@ -43,18 +43,6 @@ logger = logging.getLogger(__name__)
 
 TASK_VALIDATE_LLM_CONFIG = "validate_llm_config"
 TASK_RUN_TEST_CALL = "run_test_call"
-
-# Error keys for connection test; backend translates by request language.
-VALIDATION_ERROR_KEYS = (
-    "invalid_api_key",
-    "auth_failed",
-    "rate_limit",
-    "not_found",
-    "timeout",
-    "network_error",
-    "permission_denied",
-    "unknown",
-)
 
 # Error keys for connection test; backend translates via gettext (.po files).
 # Key -> default English message (msgid for gettext).
@@ -203,56 +191,6 @@ def _extract_usage_from_response(response: Any, params: dict) -> Tuple[
         actual_model, prompt_tokens, completion_tokens, total_tokens,
         cached_tokens, reasoning_tokens, cost,
     )
-
-
-def _string_preview(value: Any, max_len: int = 160) -> str:
-    """
-    Return a short single-line preview string for logging.
-    """
-    if value is None:
-        return ""
-    text = value if isinstance(value, str) else repr(value)
-    text = " ".join(str(text).split())
-    if len(text) <= max_len:
-        return text
-    return text[:max_len] + "..."
-
-
-def _response_debug_snapshot(
-    response: Any,
-    choice: Any,
-    message: Any,
-    content: Any,
-) -> Dict[str, Any]:
-    """
-    Build safe diagnostic fields for abnormal LLM responses.
-    """
-    hidden = getattr(response, "_hidden_params", None) or {}
-    response_id = (
-        getattr(response, "id", None)
-        or hidden.get("response_id")
-        or hidden.get("id")
-    )
-    request_id = hidden.get("x_request_id") or hidden.get("request_id")
-    finish_reason = getattr(choice, "finish_reason", None) if choice else None
-    message_role = getattr(message, "role", None) if message else None
-    tool_calls = getattr(message, "tool_calls", None) if message else None
-    refusal = getattr(message, "refusal", None) if message else None
-    if isinstance(message, dict):
-        message_role = message_role or message.get("role")
-        tool_calls = tool_calls or message.get("tool_calls")
-        refusal = refusal or message.get("refusal")
-    tool_call_count = len(tool_calls) if isinstance(tool_calls, list) else 0
-    return {
-        "response_id": response_id,
-        "request_id": request_id,
-        "finish_reason": finish_reason,
-        "message_role": message_role,
-        "tool_call_count": tool_call_count,
-        "has_refusal": bool(refusal),
-        "content_type": type(content).__name__,
-        "content_preview": _string_preview(content),
-    }
 
 
 def _create_usage_record(
@@ -465,6 +403,85 @@ def run_test_call(
         f"config_uuid={config_uuid_value} config_id={config_id_value}"
     )
     return True, content, usage_dict
+
+
+def run_test_call_stream(
+    config_uuid: Optional[str],
+    config_id: Optional[int],
+    prompt: str,
+    user: Any,
+    max_tokens: int = 512,
+) -> Generator[str, None, Optional[Dict[str, Any]]]:
+    """
+    Stream one completion with the given LLMConfig and record to LLMUsage.
+
+    Yields content chunks; usage dict is the generator's return value
+    (see StopIteration.value when the generator is exhausted).
+    On validation or LLM error, raises or yields nothing and returns
+    (False, detail, None).
+    """
+    if not (prompt or "").strip():
+        raise ValueError("Prompt cannot be empty")
+    max_tokens = min(max(1, max_tokens), 4096)
+    llm_config = None
+    if config_uuid:
+        try:
+            llm_config = LLMConfig.objects.get(uuid=config_uuid)
+        except (LLMConfig.DoesNotExist, ValueError, TypeError):
+            llm_config = None
+    if llm_config is None and config_id is not None:
+        try:
+            llm_config = LLMConfig.objects.get(pk=config_id)
+        except (LLMConfig.DoesNotExist, ValueError, TypeError):
+            llm_config = None
+    if llm_config is None:
+        raise ValueError("Config not found")
+
+    from agentcore_metering.adapters.django.trackers.llm import LLMTracker
+
+    config_uuid_value = str(getattr(llm_config, "uuid", "") or "")
+    config_id_value = getattr(llm_config, "id", None)
+    logger.info(
+        f"Starting {TASK_RUN_TEST_CALL} (stream) "
+        f"config_uuid={config_uuid_value} config_id={config_id_value}"
+    )
+    messages = [{"role": "user", "content": (prompt or "").strip()}]
+    state = {"node_name": "admin_test_call"}
+    if user is not None:
+        state["user_id"] = getattr(user, "pk", None)
+
+    gen = LLMTracker.call_and_track(
+        messages=messages,
+        max_tokens=max_tokens,
+        state=state,
+        model_uuid=config_uuid_value,
+        stream=True,
+    )
+    usage = None
+    try:
+        while True:
+            chunk = next(gen)
+            yield chunk
+    except StopIteration as e:
+        usage = e.value
+    cost = usage.get("cost") if usage else None
+    usage_dict = None
+    if usage is not None:
+        usage_dict = {
+            "model": usage.get("model", ""),
+            "prompt_tokens": usage.get("prompt_tokens", 0),
+            "completion_tokens": usage.get("completion_tokens", 0),
+            "total_tokens": usage.get("total_tokens", 0),
+            "cached_tokens": usage.get("cached_tokens", 0),
+            "reasoning_tokens": usage.get("reasoning_tokens", 0),
+            "cost": float(cost) if cost is not None else None,
+            "cost_currency": usage.get("cost_currency", DEFAULT_COST_CURRENCY),
+        }
+    logger.info(
+        f"Finished {TASK_RUN_TEST_CALL} (stream) "
+        f"config_uuid={config_uuid_value} config_id={config_id_value}"
+    )
+    return usage_dict
 
 
 def get_litellm_params(

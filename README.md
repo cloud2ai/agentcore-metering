@@ -122,7 +122,7 @@ pytest tests -v
 | GET | `.../llm-config/providers/` | Per-provider param schema (required/optional/editable keys, default model and api_base) for building provider-specific forms |
 | GET | `.../llm-config/models/` | Provider list and model list with capability tags (text-to-text / vision / code / reasoning, etc.) |
 | POST | `.../llm-config/test/` | Validate credentials without saving. Body: `provider`, `config` |
-| POST | `.../llm-config/test-call/` | Run one synchronous completion and persist usage. Body: `config_uuid` (or legacy `config_id`), `prompt`, optional `max_tokens` |
+| POST | `.../llm-config/test-call/` | Run one completion and persist usage. Body: `config_uuid` (or legacy `config_id`), `prompt`, optional `max_tokens`, optional `stream` (see below) |
 | GET | `.../llm-config/users/` | List per-user configs (optional `?user_id=` filter) |
 | GET | `.../llm-config/users/<user_id>/` | Get one user's config (404 if not set) |
 | PUT | `.../llm-config/users/<user_id>/` | Create or update that user's config |
@@ -151,10 +151,10 @@ pytest tests -v
   - invalid payload: `400`
 
 - **POST `.../llm-config/test-call/`**
-  - body: `config_uuid` (preferred) or legacy `config_id`, `prompt`, optional `max_tokens` (default 512, max 4096)
-  - success: `{ "ok": true, "content": "...", "usage": { ... } }`
-  - failure: `{ "ok": false, "detail": "..." }`
-  - call is persisted to usage records
+  - body: `config_uuid` (preferred) or legacy `config_id`, `prompt`, optional `max_tokens` (default 512, max 4096), optional `stream` (default false)
+  - when `stream` is false (default): JSON response. success: `{ "ok": true, "content": "...", "usage": { ... } }`; failure: `{ "ok": false, "detail": "..." }`
+  - when `stream` is true: response is SSE (`Content-Type: text/event-stream`). Events: `data: {"type":"chunk","content":"<fragment>"}` for each content fragment; final event `data: {"type":"done","ok":true,"usage":{...}}` or `data: {"type":"done","ok":false,"detail":"..."}`
+  - call is persisted to usage records; streaming calls are recorded with `is_streaming=true` and optional TTFT (`first_chunk_at`)
 
 ### GET `.../token-stats/`
 
@@ -167,43 +167,43 @@ pytest tests -v
 | end_date     | string | End time; date-only is end of that day |
 | user_id      | int    | Filter by user id |
 | granularity  | string | Time bucket: `day` (hour), `month` (day), `year` (month); omit for no series |
+| use_series   | string | `1` / `true` / `yes`: when set with granularity and date range, also return `series_by_model` from pre-aggregated LLMUsageSeries (for per-model trend charts) |
 
 **200** (JSON):
 
 ```json
 {
-  "summary": {
-    "total_prompt_tokens": 0,
-    "total_completion_tokens": 0,
-    "total_tokens": 0,
-    "total_cached_tokens": 0,
-    "total_reasoning_tokens": 0,
-    "total_cost": 0,
-    "total_cost_currency": "USD",
-    "total_calls": 0,
-    "successful_calls": 0,
-    "failed_calls": 0
-  },
-  "by_model": [
-    {
-      "model": "gpt-4",
-      "total_calls": 10,
-      "total_prompt_tokens": 1000,
-      "total_completion_tokens": 500,
-      "total_tokens": 1500,
-      "total_cached_tokens": 0,
-      "total_reasoning_tokens": 0,
-      "total_cost": 0.012,
-      "total_cost_currency": "USD"
-    }
-  ],
-  "series": null
+  "summary": { ... },
+  "by_model": [ ... ],
+  "series": null,
+  "series_by_model": null
 }
 ```
 
 - `series` is non-null only when `granularity` is set:
-  `{ "granularity": "day", "items": [ { "bucket": "...", ... } ] }`
+  `{ "granularity": "day", "items": [ { "bucket": "...", "total_tokens": 0, ... } ] }`
+- `series_by_model` is non-null only when `use_series=1` (or `true`/`yes`) and `granularity` and `start_date`/`end_date` are set. It is a list of `{ "bucket", "model", "call_count", "success_count", "avg_e2e_latency_sec", "avg_ttft_sec", "avg_output_tps", "total_prompt_tokens", "total_completion_tokens", "total_tokens", "total_cached_tokens", "total_reasoning_tokens", "total_cost", "cost_currency" }` from the pre-aggregated table (global scope; not filtered by `user_id`). Use it for “Token trend by model” and “Cost trend by model” charts.
 - invalid `granularity` returns `400` + `{ "detail": "..." }`
+
+---
+
+### GET / PATCH `.../metering-config/`
+
+- **GET**: Returns effective metering config (retention, cleanup and aggregation schedules).
+- **PATCH**: Update config. Body fields are optional: `retention_days` (1–3650), `cleanup_enabled`, `cleanup_crontab`, `aggregation_crontab` (five-field cron expressions).
+
+**GET 200** (JSON):
+
+```json
+{
+  "retention_days": 365,
+  "cleanup_enabled": true,
+  "cleanup_crontab": "0 2 * * *",
+  "aggregation_crontab": "5 * * * *"
+}
+```
+
+- Used by the admin UI “Data settings” / “Scheduled tasks” page to configure how long to keep data and when cleanup/aggregation run.
 
 ---
 
@@ -257,7 +257,26 @@ pytest tests -v
 
 ---
 
+## Pre-aggregated series (LLMUsageSeries)
+
+- **Table**: `llm_usage_series` stores pre-aggregated usage per **(granularity, bucket, model)**. Granularities: `hour` (for “day” view), `day` (for “month” view), `month` (for “year” view).
+- **Fields per row**: `bucket`, `model`, `call_count`, `success_count`, `avg_e2e_latency_sec`, `avg_ttft_sec`, `avg_output_tps`, token totals (`total_prompt_tokens`, `total_completion_tokens`, `total_tokens`, `total_cached_tokens`, `total_reasoning_tokens`), `total_cost`, `cost_currency`.
+- **Population**: Celery task `aggregate_llm_usage_series_task` (hour + day + month in one run when invoked from beat) aggregates from `llm_tracker_usage` into `llm_usage_series`. Use it for fast “by model” trend charts without querying raw usage on each request.
+- **API**: `GET .../token-stats/?use_series=1&granularity=...&start_date=...&end_date=...` returns `series_by_model` (list of the above rows) for charting.
+
+---
+
+## Metering config and scheduled tasks
+
+- **Config model**: `MeteringConfig` (single row) holds `retention_days` (default 365), `cleanup_enabled`, `cleanup_crontab`, `aggregation_crontab`. API: `GET` / `PATCH` `.../metering-config/` (see above).
+- **Celery tasks** (require Celery and `agentcore-task`; registered with django-celery-beat):
+  - **Cleanup**: `cleanup_old_llm_usage_task` — deletes `llm_tracker_usage` and `llm_usage_series` older than `retention_days`. No-op if `cleanup_enabled` is false.
+  - **Aggregation**: `aggregate_llm_usage_series_task` — runs hour, day, and month aggregation in one go (when called from beat without args); populates `llm_usage_series`.
+- **Task tracking**: Both tasks register with **agentcore-task** `TaskTracker` (module `agentcore_metering`). Executions appear in the unified task list and stats (status, result, error).
+
+---
+
 ## Data and layout
 
-- **Tables**: `llm_tracker_usage` (usage records), `agentcore_metering_llm_config` (LLM provider config).
+- **Tables**: `llm_tracker_usage` (usage records), `llm_usage_series` (pre-aggregated series), `agentcore_metering_llm_config` (LLM provider config), `MeteringConfig` (retention and cron settings).
 - **Package**: `agentcore_metering.adapters.django` is a full Django app (models, views, urls, admin, migrations). The public API for LLM metering lives under `trackers/` (e.g. `trackers/llm.py`); import `LLMTracker` from `agentcore_metering.adapters.django` or `agentcore_metering.adapters.django.trackers.llm`. Additional tracker types may be added under `trackers/` (e.g. `trackers/other.py`).

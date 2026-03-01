@@ -8,6 +8,7 @@ from django.urls import path
 
 from agentcore_metering.adapters.django.views import (
     AdminLLMConfigAllListView,
+    MeteringConfigAPIView,
     AdminLLMConfigDetailView,
     AdminLLMConfigGlobalView,
     AdminLLMConfigModelsView,
@@ -25,6 +26,11 @@ app_name = "agentcore_metering"
 
 urlpatterns = [
     path("users/", AdminUsersListView.as_view(), name="users"),
+    path(
+        "metering-config/",
+        MeteringConfigAPIView.as_view(),
+        name="metering-config",
+    ),
     path("token-stats/", AdminTokenStatsView.as_view(), name="token-stats"),
     path("llm-usage/", AdminLLMUsageListView.as_view(), name="llm-usage"),
     path(

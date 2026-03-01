@@ -1,7 +1,11 @@
 """Admin for LLM usage and config (agentcore_metering Django adapter)."""
 from django.contrib import admin
 
-from agentcore_metering.adapters.django.models import LLMConfig, LLMUsage
+from agentcore_metering.adapters.django.models import (
+    LLMConfig,
+    LLMUsage,
+    MeteringConfig,
+)
 
 
 @admin.register(LLMUsage)
@@ -39,6 +43,15 @@ class LLMUsageAdmin(admin.ModelAdmin):
         "created_at",
     )
     ordering = ["-created_at"]
+
+
+@admin.register(MeteringConfig)
+class MeteringConfigAdmin(admin.ModelAdmin):
+    """Admin interface for MeteringConfig (global retention, cleanup, cron)."""
+
+    list_display = ("scope", "key", "value", "updated_at")
+    list_filter = ("scope", "key")
+    ordering = ["scope", "key"]
 
 
 @admin.register(LLMConfig)

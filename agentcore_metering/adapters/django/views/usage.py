@@ -16,10 +16,10 @@ from agentcore_metering.adapters.django.serializers import (
     LLMUsageListResponseSerializer,
     TokenStatsResponseSerializer,
 )
-from agentcore_metering.adapters.django.services.usage import (
+from agentcore_metering.adapters.django.services.usage_list import (
     get_llm_usage_list_from_query,
 )
-from agentcore_metering.adapters.django.services.usage_stats import (
+from agentcore_metering.adapters.django.services.usage_aggregation import (
     get_token_stats_from_query,
 )
 
@@ -68,6 +68,15 @@ class AdminTokenStatsView(APIView):
                 OpenApiParameter.QUERY,
                 description="Time bucket: day/month/year. Omit for summary.",
                 enum=["day", "month", "year"],
+            ),
+            OpenApiParameter(
+                "use_series",
+                OpenApiTypes.STR,
+                OpenApiParameter.QUERY,
+                description=(
+                    "If 1/true/yes and granularity+date range set, include "
+                    "series_by_model from pre-aggregated table."
+                ),
             ),
         ],
         responses={

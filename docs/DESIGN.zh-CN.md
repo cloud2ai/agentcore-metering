@@ -74,7 +74,7 @@
 
 ## 七、表结构与存储
 
-- **LLMUsage**：单表存储每次调用的用量（user、model、tokens、cost、cost_currency、success 等）；按标量字段筛选与聚合，满足统计与列表需求。
+- **LLMUsage**：单表存储每次调用的用量（user、model、tokens、cost、cost_currency、success 等）；按标量字段筛选与聚合，满足统计与列表需求。调用方式（流式/非流式）由 tracker 落库（`is_streaming`）；流式调用时记录 TTFT（首 token 时间）`first_chunk_at`，列表与统计中以此为主延时。
 - **LLM 配置**：配置表存储全局/用户级配置（模型、api_base、参数等）；解析逻辑在服务层，不混入用量表。
 
 ---

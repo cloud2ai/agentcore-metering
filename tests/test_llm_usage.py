@@ -6,7 +6,7 @@ Paginated listing with filters (user_id, model, success, dates).
 import pytest
 from django.utils import timezone as django_tz
 
-from agentcore_metering.adapters.django.services.usage import (
+from agentcore_metering.adapters.django.services.usage_list import (
     get_llm_usage_list,
     get_llm_usage_list_from_query,
 )
@@ -178,3 +178,99 @@ class TestGetLlmUsageListFromQuery:
         out = get_llm_usage_list_from_query({"page": "0", "page_size": "-5"})
         assert out["page"] == 1
         assert out["page_size"] == 1
+
+
+@pytest.mark.unit
+@pytest.mark.django_db
+class TestLLMUsageStreamingFields:
+    """
+    LLMUsage is_streaming and first_chunk_at; list returns ttft_sec and latency_sec.
+    """
+
+    def test_usage_created_with_is_streaming_and_first_chunk_at(
+        self, django_user_model
+    ):
+        user = django_user_model.objects.create_user(
+            username="u1", password="p", email="u1@example.com"
+        )
+        started = django_tz.now() - django_tz.timedelta(seconds=2)
+        first_chunk = started + django_tz.timedelta(seconds=0.5)
+        rec = LLMUsage.objects.create(
+            user=user,
+            model="gpt-4",
+            prompt_tokens=1,
+            completion_tokens=2,
+            total_tokens=3,
+            success=True,
+            is_streaming=True,
+            started_at=started,
+            first_chunk_at=first_chunk,
+        )
+        rec.refresh_from_db()
+        assert rec.is_streaming is True
+        assert rec.first_chunk_at is not None
+
+    def test_list_returns_ttft_sec_and_latency_sec_for_streaming(
+        self, django_user_model
+    ):
+        user = django_user_model.objects.create_user(
+            username="u1", password="p", email="u1@example.com"
+        )
+        started = django_tz.now() - django_tz.timedelta(seconds=2)
+        first_chunk = started + django_tz.timedelta(seconds=0.5)
+        created = started + django_tz.timedelta(seconds=1.5)
+        LLMUsage.objects.create(
+            user=user,
+            model="gpt-4",
+            total_tokens=1,
+            is_streaming=True,
+            started_at=started,
+            first_chunk_at=first_chunk,
+        )
+        rec = LLMUsage.objects.order_by("-id").first()
+        rec.created_at = created
+        rec.save(update_fields=["created_at"])
+        out = get_llm_usage_list(page=1, page_size=20)
+        assert out["total"] == 1
+        item = out["results"][0]
+        assert "ttft_sec" in item
+        assert item["ttft_sec"] == pytest.approx(0.5, abs=0.01)
+        assert "latency_sec" in item
+        assert item["latency_sec"] == pytest.approx(1.5, abs=0.01)
+
+    def test_output_tps_uses_e2e_latency_not_ttft(self, django_user_model):
+        user = django_user_model.objects.create_user(
+            username="u2", password="p", email="u2@example.com"
+        )
+        started = django_tz.now() - django_tz.timedelta(seconds=10)
+        first_chunk = started + django_tz.timedelta(seconds=0.1)
+        created = started + django_tz.timedelta(seconds=10)
+        LLMUsage.objects.create(
+            user=user,
+            model="gpt-4",
+            completion_tokens=100,
+            total_tokens=100,
+            is_streaming=True,
+            started_at=started,
+            first_chunk_at=first_chunk,
+        )
+        rec = LLMUsage.objects.order_by("-id").first()
+        rec.created_at = created
+        rec.save(update_fields=["created_at"])
+        out = get_llm_usage_list(page=1, page_size=20)
+        item = out["results"][0]
+        assert item["ttft_sec"] == pytest.approx(0.1, abs=0.05)
+        assert item["latency_sec"] == pytest.approx(10.0, abs=0.05)
+        assert item["output_tps"] == pytest.approx(10.0, abs=0.01)
+
+    def test_output_tps_is_none_without_started_at(self):
+        LLMUsage.objects.create(
+            model="gpt-4",
+            completion_tokens=100,
+            total_tokens=100,
+            started_at=None,
+        )
+        out = get_llm_usage_list(page=1, page_size=20)
+        item = out["results"][0]
+        assert item["e2e_latency_sec"] is None
+        assert item["output_tps"] is None

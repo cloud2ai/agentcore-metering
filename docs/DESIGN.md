@@ -74,7 +74,7 @@ The scenarios and requirements above are established first; the “core capabili
 
 ## 7. Schema and storage
 
-- **LLMUsage**: Single table for per-call usage (user, model, tokens, cost, cost_currency, success, etc.); filtering and aggregation by scalar columns meet listing and statistics needs.
+- **LLMUsage**: Single table for per-call usage (user, model, tokens, cost, cost_currency, success, etc.); filtering and aggregation by scalar columns meet listing and statistics needs. Call mode (streaming vs non-streaming) is persisted by the tracker (`is_streaming`); for streaming calls, TTFT (time to first token) is recorded via `first_chunk_at` and used as the primary latency in listing/statistics.
 - **LLM config**: Config table(s) hold global and per-user config (model, api_base, parameters, etc.); resolution logic lives in the service layer and is separate from usage tables.
 
 ---

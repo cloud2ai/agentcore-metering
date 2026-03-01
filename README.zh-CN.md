@@ -117,7 +117,7 @@ pytest tests -v
 | GET | `.../llm-config/providers/` | 各提供商参数 schema（必填/可选键、默认 model 与 api_base），用于构建表单 |
 | GET | `.../llm-config/models/` | 提供商与模型列表（含能力标签，如 text-to-text/vision/code/reasoning） |
 | POST | `.../llm-config/test/` | 校验凭证且不保存。Body：`provider`、`config`。返回 `{ "ok": true }` 或 `{ "ok": false, "detail": "..." }` |
-| POST | `.../llm-config/test-call/` | 执行一次同步测试调用并落库。Body：`config_uuid`（或兼容 `config_id`）、`prompt`，可选 `max_tokens` |
+| POST | `.../llm-config/test-call/` | 执行一次测试调用并落库。Body：`config_uuid`（或兼容 `config_id`）、`prompt`，可选 `max_tokens`、可选 `stream`（见下） |
 | GET | `.../llm-config/users/` | 按用户配置列表（可选 `?user_id=` 筛选） |
 | GET | `.../llm-config/users/<user_id>/` | 获取指定用户的配置（未设置则 404） |
 | PUT | `.../llm-config/users/<user_id>/` | 创建或更新该用户的配置 |
@@ -143,10 +143,10 @@ pytest tests -v
   - 请求体不合法：`400`
 
 - **POST `.../llm-config/test-call/`**
-  - body：`config_uuid`（推荐）或兼容 `config_id`、`prompt`（必填）、可选 `max_tokens`（默认 512，最大 4096）
-  - 成功：`{ "ok": true, "content": "...", "usage": { ... } }`
-  - 失败：`{ "ok": false, "detail": "..." }`
-  - 调用会落到 usage 记录
+  - body：`config_uuid`（推荐）或兼容 `config_id`、`prompt`（必填）、可选 `max_tokens`（默认 512，最大 4096）、可选 `stream`（默认 false）
+  - `stream` 为 false（默认）时：JSON 响应。成功：`{ "ok": true, "content": "...", "usage": { ... } }`；失败：`{ "ok": false, "detail": "..." }`
+  - `stream` 为 true 时：响应为 SSE（`Content-Type: text/event-stream`）。事件：每段内容 `data: {"type":"chunk","content":"<片段>"}`；结束事件 `data: {"type":"done","ok":true,"usage":{...}}` 或 `data: {"type":"done","ok":false,"detail":"..."}`
+  - 调用会落到 usage 记录；流式调用以 `is_streaming=true` 记录，并可记录 TTFT（`first_chunk_at`）
 
 - **模型能力标签与推理**
   - `GET .../llm-config/models/` 返回各提供商模型列表与能力标签（如 `text-to-text`、`vision`、`code`、`reasoning`）
@@ -168,42 +168,42 @@ pytest tests -v
 | end_date      | string | 结束时间；仅日期时表示该日 23:59:59 |
 | user_id       | int    | 按用户 id 筛选 |
 | granularity   | string | 时间桶：`day`（按小时）、`month`（按天）、`year`（按月）；不传则不返回 series |
+| use_series    | string | `1` / `true` / `yes`：与 granularity、日期范围一起传时，额外返回预聚合表 LLMUsageSeries 的 `series_by_model`，用于「按模型」趋势图 |
 
 **200**（JSON）：
 
 ```json
 {
-  "summary": {
-    "total_prompt_tokens": 0,
-    "total_completion_tokens": 0,
-    "total_tokens": 0,
-    "total_cached_tokens": 0,
-    "total_reasoning_tokens": 0,
-    "total_cost": 0,
-    "total_cost_currency": "USD",
-    "total_calls": 0,
-    "successful_calls": 0,
-    "failed_calls": 0
-  },
-  "by_model": [
-    {
-      "model": "gpt-4",
-      "total_calls": 10,
-      "total_prompt_tokens": 1000,
-      "total_completion_tokens": 500,
-      "total_tokens": 1500,
-      "total_cached_tokens": 0,
-      "total_reasoning_tokens": 0,
-      "total_cost": 0.012,
-      "total_cost_currency": "USD"
-    }
-  ],
-  "series": null
+  "summary": { ... },
+  "by_model": [ ... ],
+  "series": null,
+  "series_by_model": null
 }
 ```
 
-- 仅当传入 `granularity` 时 `series` 非空：`{ "granularity": "day", "items": [ { "bucket": "...", ... } ] }`
+- 仅当传入 `granularity` 时 `series` 非空：`{ "granularity": "day", "items": [ { "bucket": "...", "total_tokens": 0, ... } ] }`
+- 仅当传入 `use_series=1`（或 `true`/`yes`）且同时有 `granularity` 与 `start_date`/`end_date` 时 `series_by_model` 非空。其为预聚合表的一条条 `{ "bucket", "model", "call_count", "success_count", "avg_e2e_latency_sec", "avg_ttft_sec", "avg_output_tps", "total_*_tokens", "total_cost", "cost_currency" }`，为全局数据（不按 user_id 过滤），用于「Token 趋势（按模型）」与「费用趋势（按模型）」等图表。
 - `granularity` 非法时返回 `400` + `{ "detail": "..." }`
+
+---
+
+### GET / PATCH `.../metering-config/`
+
+- **GET**：返回当前生效的计量配置（保留天数、清理与汇总的 cron）。
+- **PATCH**：更新配置。Body 字段均可选：`retention_days`（1–3650）、`cleanup_enabled`、`cleanup_crontab`、`aggregation_crontab`（五段 cron 表达式）。
+
+**GET 200**（JSON）：
+
+```json
+{
+  "retention_days": 365,
+  "cleanup_enabled": true,
+  "cleanup_crontab": "0 2 * * *",
+  "aggregation_crontab": "5 * * * *"
+}
+```
+
+- 管理端「定时任务 / 数据设置」页通过该接口配置数据保留时长与清理/汇总执行时间。
 
 ---
 
@@ -257,7 +257,26 @@ pytest tests -v
 
 ---
 
+## 预聚合序列（LLMUsageSeries）
+
+- **表**：`llm_usage_series` 按 **(granularity, bucket, model)** 预聚合。粒度：`hour`（对应「按天」视图）、`day`（对应「按月」）、`month`（对应「按年」）。
+- **每行字段**：`bucket`、`model`、`call_count`、`success_count`、`avg_e2e_latency_sec`、`avg_ttft_sec`、`avg_output_tps`，以及各类 token 合计与 `total_cost`、`cost_currency`。
+- **写入**：Celery 任务 `aggregate_llm_usage_series_task`（由 beat 触发时一次跑 hour + day + month）从 `llm_tracker_usage` 聚合写入 `llm_usage_series`，用于按模型趋势图的高效查询。
+- **接口**：`GET .../token-stats/?use_series=1&granularity=...&start_date=...&end_date=...` 返回 `series_by_model`（上述行的列表）供前端绘图。
+
+---
+
+## 计量配置与定时任务
+
+- **配置**：`MeteringConfig`（单行）存 `retention_days`（默认 365）、`cleanup_enabled`、`cleanup_crontab`、`aggregation_crontab`。接口见上文 `GET/PATCH .../metering-config/`。
+- **Celery 任务**（需安装 Celery 与 `agentcore-task`，由 django-celery-beat 注册）：
+  - **清理**：`cleanup_old_llm_usage_task` — 删除早于 `retention_days` 的 `llm_tracker_usage` 与 `llm_usage_series`。若 `cleanup_enabled` 为 false 则不执行。
+  - **汇总**：`aggregate_llm_usage_series_task` — 一次执行 hour、day、month 三种粒度汇总，写入 `llm_usage_series`。
+- **任务跟踪**：上述两个任务均通过 **agentcore-task** 的 `TaskTracker` 登记（模块名 `agentcore_metering`），执行记录会出现在统一任务列表与统计中（状态、result、error）。
+
+---
+
 ## 数据与结构
 
-- **表**：`llm_tracker_usage`（用量记录）、`agentcore_metering_llm_config`（LLM 提供商配置）。
+- **表**：`llm_tracker_usage`（用量记录）、`llm_usage_series`（预聚合序列）、`agentcore_metering_llm_config`（LLM 配置）、`MeteringConfig`（保留天数与 cron 配置）。
 - **包**：`agentcore_metering.adapters.django` 为完整 Django 应用（models、views、urls、admin、migrations）。业务逻辑在 `adapters/django/services/`（如 `runtime_config`、`config_source`、`usage`、`usage_stats`）；对外调用入口在 `adapters/django/trackers/`，LLM 为 `trackers/llm.py`。建议从 `agentcore_metering.adapters.django` 或 `agentcore_metering.adapters.django.trackers.llm` 导入 `LLMTracker`。后续若有其他 tracker 可在 `trackers/` 下新增模块（如 `other.py`）。

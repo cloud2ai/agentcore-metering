@@ -1,3 +1,6 @@
+import json
+
+from django.http import StreamingHttpResponse
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.permissions import IsAdminUser
@@ -14,6 +17,7 @@ from agentcore_metering.adapters.django.services.runtime_config import (
     VALIDATION_MESSAGE_IDS,
     get_validation_message,
     run_test_call,
+    run_test_call_stream,
     validate_llm_config,
 )
 
@@ -98,20 +102,73 @@ class AdminLLMConfigTestCallView(APIView):
         config_id = data.get("config_id")
         prompt = (data.get("prompt") or "").strip()
         max_tokens = data.get("max_tokens") or 512
-        ok, content_or_detail, usage_dict = run_test_call(
-            config_uuid=str(config_uuid) if config_uuid else None,
-            config_id=config_id,
-            prompt=prompt,
-            user=request.user,
-            max_tokens=max_tokens,
-        )
-        if ok:
+        stream = data.get("stream", False)
+
+        if not stream:
+            ok, content_or_detail, usage_dict = run_test_call(
+                config_uuid=str(config_uuid) if config_uuid else None,
+                config_id=config_id,
+                prompt=prompt,
+                user=request.user,
+                max_tokens=max_tokens,
+            )
+            if ok:
+                return Response({
+                    "ok": True,
+                    "content": content_or_detail,
+                    "usage": usage_dict,
+                })
             return Response({
+                "ok": False,
+                "detail": content_or_detail,
+            }, status=status.HTTP_200_OK)
+
+        try:
+            gen = run_test_call_stream(
+                config_uuid=str(config_uuid) if config_uuid else None,
+                config_id=config_id,
+                prompt=prompt,
+                user=request.user,
+                max_tokens=max_tokens,
+            )
+        except ValueError as e:
+            return Response({
+                "ok": False,
+                "detail": str(e),
+            }, status=status.HTTP_200_OK)
+
+        def sse_stream():
+            usage_dict = None
+            try:
+                while True:
+                    chunk = next(gen)
+                    if isinstance(chunk, (list, tuple)) and len(chunk) >= 2:
+                        kind, text = chunk[0], chunk[1]
+                        payload = json.dumps({"type": kind, "content": text})
+                    else:
+                        payload = json.dumps(
+                            {"type": "chunk", "content": chunk}
+                        )
+                    yield f"data: {payload}\n\n"
+            except StopIteration as e:
+                usage_dict = e.value
+            except Exception as e:
+                payload = json.dumps(
+                    {"type": "done", "ok": False, "detail": str(e)}
+                )
+                yield f"data: {payload}\n\n"
+                return
+            payload = json.dumps({
+                "type": "done",
                 "ok": True,
-                "content": content_or_detail,
-                "usage": usage_dict,
+                "usage": usage_dict or {},
             })
-        return Response({
-            "ok": False,
-            "detail": content_or_detail,
-        }, status=status.HTTP_200_OK)
+            yield f"data: {payload}\n\n"
+
+        response = StreamingHttpResponse(
+            sse_stream(),
+            content_type="text/event-stream",
+        )
+        response["Cache-Control"] = "no-cache"
+        response["X-Accel-Buffering"] = "no"
+        return response

@@ -103,6 +103,20 @@ class LLMUsage(models.Model):
             "When the LLM request started (t_start). Used for E2E latency."
         ),
     )
+    is_streaming = models.BooleanField(
+        default=False,
+        db_index=True,
+        help_text="Whether the call was made in streaming mode",
+    )
+    first_chunk_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text=(
+            "When the first content chunk arrived (streaming only). "
+            "Used for TTFT = first_chunk_at - started_at."
+        ),
+    )
     created_at = models.DateTimeField(
         auto_now_add=True,
         db_index=True,
@@ -129,6 +143,72 @@ class LLMUsage(models.Model):
             f"{node_info}{self.model} "
             f"({self.total_tokens} tokens) - {self.created_at}"
         )
+
+
+class LLMUsageSeries(models.Model):
+    """
+    Pre-aggregated time-series per (granularity, bucket, model) for charts.
+
+    Populated by a scheduled task from LLMUsage. Supports day (hourly buckets),
+    month (daily buckets), year (monthly buckets). Used for performance
+    curves (e2e, ttft, output_tps), token trend, and cost trend by model.
+    """
+
+    class Granularity(models.TextChoices):
+        HOUR = "hour", _("Hour (for day view)")
+        DAY = "day", _("Day (for month view)")
+        MONTH = "month", _("Month (for year view)")
+
+    granularity = models.CharField(
+        max_length=10,
+        choices=Granularity.choices,
+        db_index=True,
+    )
+    bucket = models.DateTimeField(
+        db_index=True,
+        help_text="Truncated time bucket (hour/day/month).",
+    )
+    model = models.CharField(max_length=200, db_index=True)
+
+    call_count = models.PositiveIntegerField(default=0)
+    success_count = models.PositiveIntegerField(default=0)
+
+    avg_e2e_latency_sec = models.FloatField(null=True, blank=True)
+    avg_ttft_sec = models.FloatField(null=True, blank=True)
+    avg_output_tps = models.FloatField(null=True, blank=True)
+
+    total_prompt_tokens = models.BigIntegerField(default=0)
+    total_completion_tokens = models.BigIntegerField(default=0)
+    total_tokens = models.BigIntegerField(default=0)
+    total_cached_tokens = models.BigIntegerField(default=0)
+    total_reasoning_tokens = models.BigIntegerField(default=0)
+
+    total_cost = models.DecimalField(
+        max_digits=12,
+        decimal_places=6,
+        null=True,
+        blank=True,
+    )
+    cost_currency = models.CharField(max_length=10, default="USD", blank=True)
+
+    class Meta:
+        db_table = "llm_usage_series"
+        verbose_name = _("LLM Usage Series")
+        verbose_name_plural = _("LLM Usage Series")
+        ordering = ["granularity", "bucket", "model"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["granularity", "bucket", "model"],
+                name="llm_usage_series_unique_bucket_model",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["granularity", "bucket"]),
+            models.Index(fields=["granularity", "model", "bucket"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.granularity} {self.bucket} {self.model}"
 
 
 class LLMConfig(models.Model):
@@ -221,3 +301,42 @@ class LLMConfig(models.Model):
         if self.scope == self.Scope.GLOBAL:
             return f"LLM config (global) {self.provider}"
         return f"LLM config (user {self.user_id}) {self.provider}"
+
+
+class MeteringConfig(models.Model):
+    """
+    Global config for metering: retention_days, cleanup_crontab,
+    cleanup_enabled, aggregation schedules. Used by periodic tasks
+    and config API (frontend).
+    """
+
+    SCOPE_GLOBAL = "global"
+    SCOPE_CHOICES = [(SCOPE_GLOBAL, "Global")]
+
+    scope = models.CharField(
+        max_length=20,
+        choices=SCOPE_CHOICES,
+        default=SCOPE_GLOBAL,
+        db_index=True,
+    )
+    key = models.CharField(max_length=128, db_index=True)
+    value = models.JSONField(
+        default=dict,
+        help_text="Config payload, e.g. {\"retention_days\": 365}.",
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "agentcore_metering_config"
+        verbose_name = _("Metering Config")
+        verbose_name_plural = _("Metering Configs")
+        constraints = [
+            models.UniqueConstraint(
+                fields=["scope", "key"],
+                name="agentcore_metering_config_scope_key_uniq",
+            ),
+        ]
+        indexes = [models.Index(fields=["scope", "key"])]
+
+    def __str__(self) -> str:
+        return f"MeteringConfig(scope={self.scope}, key={self.key})"

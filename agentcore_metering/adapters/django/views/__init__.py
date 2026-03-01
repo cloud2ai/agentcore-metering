@@ -16,6 +16,9 @@ from agentcore_metering.adapters.django.views.config_validation import (
     AdminLLMConfigTestCallView,
     AdminLLMConfigTestView,
 )
+from agentcore_metering.adapters.django.views.metering_config import (
+    MeteringConfigAPIView,
+)
 from agentcore_metering.adapters.django.views.usage import (
     AdminLLMUsageListView,
     AdminTokenStatsView,
@@ -35,4 +38,5 @@ __all__ = [
     "AdminLLMUsageListView",
     "AdminTokenStatsView",
     "AdminUsersListView",
+    "MeteringConfigAPIView",
 ]

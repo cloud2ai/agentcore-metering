@@ -1,55 +1,92 @@
 """
 LLM call tracker using LiteLLM: completion + usage and cost tracking.
 
-Uses litellm.completion() and litellm.completion_cost() for reference pricing.
+Uses litellm.completion(); token/cost extraction is delegated to llm_usage.
+Applies LiteLLM global retry and timeout at module load. Handles
+AuthenticationError, RateLimitError, and APIError with distinct logging.
 """
 import logging
+from datetime import datetime
 from decimal import Decimal
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Generator, Optional, Tuple, Union
 
 from django.db import transaction
 from django.utils import timezone
 import litellm
-from litellm import completion_cost
+from litellm import APIError, AuthenticationError, RateLimitError
 
 from agentcore_metering.adapters.django.models import LLMUsage
 from agentcore_metering.adapters.django.services.runtime_config import (
     get_litellm_params,
 )
-from agentcore_metering.adapters.django.utils import (
-    _read_field,
-    _read_nested_int,
-    _safe_int,
+from agentcore_metering.adapters.django.trackers.llm_usage import (
+    fill_usage_with_token_fallback,
+    usage_from_response,
+    usage_from_stream_chunk,
 )
-from agentcore_metering.constants import DEFAULT_COST_CURRENCY
+from agentcore_metering.constants import (
+    DEFAULT_COST_CURRENCY,
+    LITELLM_NUM_RETRIES,
+    LITELLM_REQUEST_TIMEOUT,
+)
 
 logger = logging.getLogger(__name__)
 
 TASK_LLM_CALL = "llm_call"
 
+litellm.num_retries = LITELLM_NUM_RETRIES
+litellm.request_timeout = LITELLM_REQUEST_TIMEOUT
 
-def _get_cost_from_response(response: Any) -> Optional[Decimal]:
-    try:
-        cost = completion_cost(completion_response=response)
-        if cost is not None:
-            return Decimal(str(cost))
-    except (TypeError, ValueError) as e:
-        logger.debug("completion_cost or Decimal failed: %s", e)
-    except Exception as e:
-        logger.debug("completion_cost failed: %s", e)
-    hidden = getattr(response, "_hidden_params", None) or {}
-    cost = hidden.get("response_cost")
-    if cost is not None:
-        try:
-            return Decimal(str(cost))
-        except (TypeError, ValueError):
-            model = getattr(response, "model", "unknown")
-            logger.warning(
-                "Invalid response_cost in hidden params "
-                f"model={model} response_cost={cost}"
-            )
-            return None
-    return None
+
+def _default_usage_dict(model: str) -> Dict[str, Any]:
+    """Zero usage dict when no chunk/response usage is available."""
+    return {
+        "model": model,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "cached_tokens": 0,
+        "reasoning_tokens": 0,
+        "cost": None,
+        "cost_currency": DEFAULT_COST_CURRENCY,
+    }
+
+
+def _record_failed_llm_call(
+    *,
+    effective_state: Dict[str, Any],
+    state: Optional[Dict],
+    request_started_at: Any,
+    node_name: str,
+    is_streaming: bool,
+    error_msg: str,
+) -> None:
+    """Record a failed LLM call into state and DB. Does not raise."""
+    if state is not None:
+        state.setdefault("llm_calls", []).append({
+            "node": node_name,
+            "model": "unknown",
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "success": False,
+            "error": error_msg,
+        })
+    LLMTracker._save_usage_to_db(
+        state=effective_state,
+        model="unknown",
+        prompt_tokens=0,
+        completion_tokens=0,
+        total_tokens=0,
+        cached_tokens=0,
+        reasoning_tokens=0,
+        cost=None,
+        cost_currency=DEFAULT_COST_CURRENCY,
+        success=False,
+        error=error_msg,
+        started_at=request_started_at,
+        is_streaming=is_streaming,
+    )
 
 
 class LLMTracker:
@@ -68,17 +105,23 @@ class LLMTracker:
         node_name: str = "unknown",
         state: Optional[Dict] = None,
         model_uuid: Optional[str] = None,
-    ) -> Tuple[str, Dict[str, Any]]:
+        stream: bool = False,
+    ) -> Union[
+        Tuple[str, Dict[str, Any]],
+        Generator[str, None, Dict[str, Any]],
+    ]:
         """
         Call LLM via LiteLLM and persist usage + cost.
 
         When model_uuid is provided, uses that LLM config. Otherwise uses
         the earliest enabled LLM config (user scope then global).
 
-        Returns:
-            (response_content, usage_dict with model, prompt_tokens,
-             completion_tokens, total_tokens, cached_tokens, reasoning_tokens,
-             cost, cost_currency).
+        When stream=False: returns (response_content, usage_dict).
+        When stream=True: returns a generator that yields content chunks;
+        usage is the generator's return value (StopIteration.value).
+
+        usage_dict contains: model, prompt_tokens, completion_tokens,
+        total_tokens, cached_tokens, reasoning_tokens, cost, cost_currency.
         """
         if not messages:
             raise ValueError("Messages cannot be empty")
@@ -102,12 +145,28 @@ class LLMTracker:
             params["response_format"] = response_format
 
         params["messages"] = messages
-        effective_state = {**(state or {}), "node_name": node_name}
+        state_node = None
+        if isinstance(state, dict):
+            state_node = state.get("node_name")
+        effective_state = {
+            **(state or {}),
+            "node_name": (state_node if state_node else node_name),
+        }
         request_started_at = timezone.now()
         logger.info(
             f"Starting {TASK_LLM_CALL} node_name={node_name} "
             f"model={model} message_count={len(messages)}"
         )
+
+        if stream:
+            return LLMTracker._call_and_track_stream(
+                params=params,
+                effective_state=effective_state,
+                request_started_at=request_started_at,
+                node_name=node_name,
+                state=state,
+                model=model,
+            )
 
         try:
             response = litellm.completion(**params)
@@ -126,68 +185,20 @@ class LLMTracker:
             if not (content and str(content).strip()):
                 raise ValueError("LLM returned empty response")
 
-            usage_obj = getattr(response, "usage", None)
-            prompt_tokens = 0
-            completion_tokens = 0
-            total_tokens = 0
-            cached_tokens = 0
-            reasoning_tokens = 0
-            if usage_obj:
-                prompt_tokens = _safe_int(
-                    _read_field(usage_obj, "prompt_tokens", 0)
-                )
-                completion_tokens = _safe_int(
-                    _read_field(usage_obj, "completion_tokens", 0)
-                )
-                total_tokens = (
-                    _safe_int(_read_field(usage_obj, "total_tokens", 0))
-                    or (prompt_tokens + completion_tokens)
-                )
-                cached_tokens = _safe_int(
-                    _read_field(usage_obj, "cached_tokens", 0)
-                )
-                reasoning_tokens = _safe_int(
-                    _read_field(usage_obj, "reasoning_tokens", 0)
-                )
-                if cached_tokens == 0:
-                    prompt_details = (
-                        _read_field(usage_obj, "prompt_tokens_details", None)
-                        or _read_field(usage_obj, "input_token_details", None)
-                    )
-                    cached_tokens = _read_nested_int(
-                        prompt_details,
-                        ("cached_tokens", "cache_read_tokens", "cache_read"),
-                        0,
-                    )
-                if reasoning_tokens == 0:
-                    completion_details = (
-                        _read_field(
-                            usage_obj,
-                            "completion_tokens_details",
-                            None,
-                        )
-                        or _read_field(usage_obj, "output_token_details", None)
-                    )
-                    reasoning_tokens = _read_nested_int(
-                        completion_details,
-                        ("reasoning_tokens", "reasoning"),
-                        0,
-                    )
-
-            actual_model = getattr(response, "model", None) or model
-            cost = _get_cost_from_response(response)
-            cost_currency = DEFAULT_COST_CURRENCY
-
-            usage = {
-                "model": actual_model,
-                "prompt_tokens": prompt_tokens,
-                "completion_tokens": completion_tokens,
-                "total_tokens": total_tokens,
-                "cached_tokens": cached_tokens,
-                "reasoning_tokens": reasoning_tokens,
-                "cost": float(cost) if cost is not None else None,
-                "cost_currency": cost_currency,
-            }
+            usage = usage_from_response(response, model)
+            usage = fill_usage_with_token_fallback(
+                usage,
+                model,
+                messages=params.get("messages"),
+                content=str(content).strip() if content else None,
+            )
+            cost = (
+                Decimal(str(usage["cost"]))
+                if usage.get("cost") is not None
+                else None
+            )
+            cost_currency = usage.get("cost_currency", DEFAULT_COST_CURRENCY)
+            response_model_raw = getattr(response, "model", None)
 
             if state is not None:
                 state.setdefault("llm_calls", []).append({
@@ -206,7 +217,7 @@ class LLMTracker:
 
             LLMTracker._save_usage_to_db(
                 state=effective_state,
-                model=usage["model"],
+                model=model,
                 prompt_tokens=usage["prompt_tokens"],
                 completion_tokens=usage["completion_tokens"],
                 total_tokens=usage["total_tokens"],
@@ -217,6 +228,8 @@ class LLMTracker:
                 success=True,
                 error=None,
                 started_at=request_started_at,
+                is_streaming=False,
+                response_model=response_model_raw,
             )
 
             logger.info(
@@ -226,6 +239,54 @@ class LLMTracker:
             )
             return str(content), usage
 
+        except AuthenticationError as e:
+            node = effective_state.get("node_name", "unknown")
+            logger.error(
+                f"Failed {TASK_LLM_CALL} (authentication) "
+                f"node_name={node} error={e}"
+            )
+            logger.exception(e)
+            _record_failed_llm_call(
+                effective_state=effective_state,
+                state=state,
+                request_started_at=request_started_at,
+                node_name=node,
+                is_streaming=False,
+                error_msg=str(e),
+            )
+            raise
+        except RateLimitError as e:
+            node = effective_state.get("node_name", "unknown")
+            logger.warning(
+                f"Failed {TASK_LLM_CALL} (rate limit) "
+                f"node_name={node} error={e}"
+            )
+            logger.exception(e)
+            _record_failed_llm_call(
+                effective_state=effective_state,
+                state=state,
+                request_started_at=request_started_at,
+                node_name=node,
+                is_streaming=False,
+                error_msg=str(e),
+            )
+            raise
+        except APIError as e:
+            node = effective_state.get("node_name", "unknown")
+            logger.error(
+                f"Failed {TASK_LLM_CALL} (API error) "
+                f"node_name={node} error={e}"
+            )
+            logger.exception(e)
+            _record_failed_llm_call(
+                effective_state=effective_state,
+                state=state,
+                request_started_at=request_started_at,
+                node_name=node,
+                is_streaming=False,
+                error_msg=str(e),
+            )
+            raise
         except Exception as e:
             node = effective_state.get("node_name", "unknown")
             logger.error(
@@ -233,29 +294,13 @@ class LLMTracker:
                 f"error_type={type(e).__name__} error={e}"
             )
             logger.exception(e)
-            if state is not None:
-                state.setdefault("llm_calls", []).append({
-                    "node": node,
-                    "model": "unknown",
-                    "prompt_tokens": 0,
-                    "completion_tokens": 0,
-                    "total_tokens": 0,
-                    "success": False,
-                    "error": str(e),
-                })
-            LLMTracker._save_usage_to_db(
-                state=effective_state,
-                model="unknown",
-                prompt_tokens=0,
-                completion_tokens=0,
-                total_tokens=0,
-                cached_tokens=0,
-                reasoning_tokens=0,
-                cost=None,
-                cost_currency=DEFAULT_COST_CURRENCY,
-                success=False,
-                error=str(e),
-                started_at=request_started_at,
+            _record_failed_llm_call(
+                effective_state=effective_state,
+                state=state,
+                request_started_at=request_started_at,
+                node_name=node,
+                is_streaming=False,
+                error_msg=str(e),
             )
             raise
 
@@ -274,8 +319,14 @@ class LLMTracker:
         success: bool = True,
         error: Optional[str] = None,
         started_at: Optional[Any] = None,
+        is_streaming: bool = False,
+        first_chunk_at: Optional[datetime] = None,
+        response_model: Optional[str] = None,
     ) -> None:
-        """Persist one LLM usage record (tokens, optional cost, started_at)."""
+        """
+        Persist one LLM usage record. model is the configured/request model;
+        response_model from API (if any) is stored in metadata for reference.
+        """
         try:
             state = state or {}
             user_id = state.get("user_id")
@@ -296,6 +347,8 @@ class LLMTracker:
             source_path = state.get("source_path")
             if source_path:
                 metadata["source_path"] = source_path
+            if response_model and str(response_model).strip():
+                metadata["response_model"] = str(response_model).strip()
             extra = state.get("metadata")
             if isinstance(extra, dict):
                 metadata.update(extra)
@@ -315,6 +368,8 @@ class LLMTracker:
                     error=error,
                     metadata=metadata,
                     started_at=started_at,
+                    is_streaming=is_streaming,
+                    first_chunk_at=first_chunk_at,
                 )
         except Exception as e:
             logger.warning(
@@ -322,3 +377,250 @@ class LLMTracker:
                 f"model={model}, user_id={user_id}, error={e}",
                 exc_info=True,
             )
+
+    @staticmethod
+    def _call_and_track_stream(
+        params: Dict[str, Any],
+        effective_state: Dict[str, Any],
+        request_started_at: Any,
+        node_name: str,
+        state: Optional[Dict],
+        model: str,
+    ) -> Generator[tuple, None, Dict[str, Any]]:
+        """
+        Streaming branch: litellm.completion(stream=True), yield (kind, text)
+        with kind "reasoning" or "content". first_chunk_at on first non-empty
+        chunk, usage from last chunk, then _save_usage_to_db.
+        Returns usage as generator return value (StopIteration.value).
+        """
+        first_chunk_at: Optional[datetime] = None
+        last_chunk = None
+        streamed_content_len = 0
+        streamed_content = ""
+
+        def _build_usage_and_save(
+            _usage: Dict[str, Any],
+            _last_chunk: Any,
+            _streamed_content: str,
+            _first_chunk_at: Optional[datetime],
+            success: bool = True,
+            error: Optional[str] = None,
+        ) -> None:
+            usage_in = fill_usage_with_token_fallback(
+                _usage,
+                model,
+                messages=params.get("messages"),
+                streamed_content=_streamed_content or None,
+            )
+            cost = usage_in.get("cost")
+            cost_currency = usage_in.get(
+                "cost_currency", DEFAULT_COST_CURRENCY
+            )
+            if cost is not None:
+                try:
+                    cost = Decimal(str(cost))
+                except (TypeError, ValueError):
+                    cost = None
+            if state is not None and success:
+                state.setdefault("llm_calls", []).append({
+                    "node": effective_state.get("node_name", "unknown"),
+                    "model": usage_in["model"],
+                    "prompt_tokens": usage_in["prompt_tokens"],
+                    "completion_tokens": usage_in["completion_tokens"],
+                    "total_tokens": usage_in["total_tokens"],
+                    "cached_tokens": usage_in["cached_tokens"],
+                    "reasoning_tokens": usage_in["reasoning_tokens"],
+                    "cost": usage_in.get("cost"),
+                    "cost_currency": usage_in.get("cost_currency"),
+                    "success": True,
+                    "error": None,
+                })
+            response_model_raw = (
+                getattr(_last_chunk, "model", None) if _last_chunk else None
+            )
+            LLMTracker._save_usage_to_db(
+                state=effective_state,
+                model=model,
+                prompt_tokens=usage_in["prompt_tokens"],
+                completion_tokens=usage_in["completion_tokens"],
+                total_tokens=usage_in["total_tokens"],
+                cached_tokens=usage_in["cached_tokens"],
+                reasoning_tokens=usage_in["reasoning_tokens"],
+                cost=cost,
+                cost_currency=cost_currency,
+                success=success,
+                error=error,
+                started_at=request_started_at,
+                is_streaming=True,
+                first_chunk_at=_first_chunk_at,
+                response_model=response_model_raw,
+            )
+
+        try:
+            stream_params = {
+                **params,
+                "stream": True,
+                "stream_options": {"include_usage": True},
+            }
+            stream_response = litellm.completion(**stream_params)
+            for chunk in stream_response:
+                last_chunk = chunk
+                choices = getattr(chunk, "choices", None) or []
+                choice = choices[0] if choices else None
+                if not choice or not getattr(choice, "delta", None):
+                    continue
+                delta = choice.delta
+                reasoning_raw = (
+                    getattr(delta, "reasoning_content", None)
+                    or getattr(delta, "reasoning", None)
+                )
+                if reasoning_raw is not None:
+                    text = str(reasoning_raw).strip()
+                    if text:
+                        streamed_content_len += len(text)
+                        streamed_content += text
+                        if first_chunk_at is None:
+                            first_chunk_at = timezone.now()
+                        try:
+                            yield ("reasoning", text)
+                        except GeneratorExit:
+                            usage_partial = (
+                                usage_from_stream_chunk(last_chunk, model)
+                                if last_chunk
+                                else _default_usage_dict(model)
+                            )
+                            _build_usage_and_save(
+                                usage_partial,
+                                last_chunk,
+                                streamed_content,
+                                first_chunk_at,
+                                success=True,
+                                error=None,
+                            )
+                            logger.info(
+                                f"Stream stopped by client (stream) "
+                                f"node_name={node_name} model={model} "
+                                f"streamed_len={streamed_content_len}"
+                            )
+                            raise
+                content = getattr(delta, "content", None)
+                if content is not None:
+                    text = str(content).strip()
+                    if text:
+                        streamed_content_len += len(text)
+                        streamed_content += text
+                        if first_chunk_at is None:
+                            first_chunk_at = timezone.now()
+                        try:
+                            yield ("content", text)
+                        except GeneratorExit:
+                            usage_partial = (
+                                usage_from_stream_chunk(last_chunk, model)
+                                if last_chunk
+                                else _default_usage_dict(model)
+                            )
+                            _build_usage_and_save(
+                                usage_partial,
+                                last_chunk,
+                                streamed_content,
+                                first_chunk_at,
+                                success=True,
+                                error=None,
+                            )
+                            logger.info(
+                                f"Stream stopped by client (stream) "
+                                f"node_name={node_name} model={model} "
+                                f"streamed_len={streamed_content_len}"
+                            )
+                            raise
+            usage = (
+                usage_from_stream_chunk(last_chunk, model)
+                if last_chunk
+                else _default_usage_dict(model)
+            )
+            usage = fill_usage_with_token_fallback(
+                usage,
+                model,
+                messages=params.get("messages"),
+                streamed_content=streamed_content or None,
+            )
+            _build_usage_and_save(
+                usage,
+                last_chunk,
+                streamed_content,
+                first_chunk_at,
+                success=True,
+                error=None,
+            )
+            logger.info(
+                f"Finished {TASK_LLM_CALL} (stream) node_name={node_name} "
+                f"model={usage['model']} "
+                f"total_tokens={usage.get('total_tokens')}"
+            )
+            return usage
+        except GeneratorExit:
+            raise
+        except AuthenticationError as e:
+            node = effective_state.get("node_name", "unknown")
+            logger.error(
+                f"Failed {TASK_LLM_CALL} (stream, authentication) "
+                f"node_name={node} error={e}"
+            )
+            logger.exception(e)
+            _record_failed_llm_call(
+                effective_state=effective_state,
+                state=state,
+                request_started_at=request_started_at,
+                node_name=node,
+                is_streaming=True,
+                error_msg=str(e),
+            )
+            raise
+        except RateLimitError as e:
+            node = effective_state.get("node_name", "unknown")
+            logger.warning(
+                f"Failed {TASK_LLM_CALL} (stream, rate limit) "
+                f"node_name={node} error={e}"
+            )
+            logger.exception(e)
+            _record_failed_llm_call(
+                effective_state=effective_state,
+                state=state,
+                request_started_at=request_started_at,
+                node_name=node,
+                is_streaming=True,
+                error_msg=str(e),
+            )
+            raise
+        except APIError as e:
+            node = effective_state.get("node_name", "unknown")
+            logger.error(
+                f"Failed {TASK_LLM_CALL} (stream, API error) "
+                f"node_name={node} error={e}"
+            )
+            logger.exception(e)
+            _record_failed_llm_call(
+                effective_state=effective_state,
+                state=state,
+                request_started_at=request_started_at,
+                node_name=node,
+                is_streaming=True,
+                error_msg=str(e),
+            )
+            raise
+        except Exception as e:
+            node = effective_state.get("node_name", "unknown")
+            logger.error(
+                f"Failed {TASK_LLM_CALL} (stream) node_name={node} "
+                f"error_type={type(e).__name__} error={e}"
+            )
+            logger.exception(e)
+            _record_failed_llm_call(
+                effective_state=effective_state,
+                state=state,
+                request_started_at=request_started_at,
+                node_name=node,
+                is_streaming=True,
+                error_msg=str(e),
+            )
+            raise

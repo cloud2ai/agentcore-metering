@@ -264,8 +264,7 @@ class TestRuntimeConfigService:
             rc.litellm, "completion", lambda **kwargs: response
         )
         monkeypatch.setattr(
-            rc,
-            "completion_cost",
+            "agentcore_metering.adapters.django.trackers.llm_usage.completion_cost",
             lambda completion_response: 0.5,
         )
 
@@ -320,8 +319,7 @@ class TestRuntimeConfigService:
             rc.litellm, "completion", lambda **kwargs: response
         )
         monkeypatch.setattr(
-            rc,
-            "completion_cost",
+            "agentcore_metering.adapters.django.trackers.llm_usage.completion_cost",
             lambda completion_response: 0.5,
         )
 
@@ -364,8 +362,7 @@ class TestRuntimeConfigService:
             rc.litellm, "completion", lambda **kwargs: response
         )
         monkeypatch.setattr(
-            rc,
-            "completion_cost",
+            "agentcore_metering.adapters.django.trackers.llm_usage.completion_cost",
             lambda completion_response: 0.5,
         )
         caplog.set_level(logging.INFO, logger=rc.logger.name)
@@ -380,8 +377,8 @@ class TestRuntimeConfigService:
 
         assert ok is True
         assert content == "hello"
-        assert "LLM test-call request" in caplog.text
-        assert "LLM test-call response" in caplog.text
+        assert "Starting run_test_call" in caplog.text
+        assert "Finished run_test_call" in caplog.text
 
     def test_run_test_call_returns_error_for_empty_content(
         self, django_user_model, monkeypatch
@@ -470,6 +467,3 @@ class TestRuntimeConfigService:
         assert ok is False
         assert detail == "LLM returned empty response"
         assert call_usage is None
-        assert "response_id=resp_test_001" in caplog.text
-        assert "tool_call_count=1" in caplog.text
-        assert "finish_reason=length" in caplog.text

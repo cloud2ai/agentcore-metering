@@ -200,3 +200,225 @@ class TestCallAndTrackUsageExtraction:
                 messages=[{"role": "user", "content": "hi"}]
             )
         assert "empty" in str(exc_info.value).lower()
+
+
+@pytest.mark.unit
+class TestCallAndTrackTokenFallback:
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.LLMTracker"
+        "._save_usage_to_db"
+    )
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.litellm"
+    )
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.get_litellm_params"
+    )
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm_usage.token_counter"
+    )
+    def test_sync_fallback_uses_token_counter_when_usage_is_zero(
+        self, mock_token_counter, mock_params, mock_litellm, mock_save_usage
+    ):
+        def _side_effect(
+            *,
+            model,
+            custom_tokenizer=None,
+            text=None,
+            messages=None,
+            **_kwargs,
+        ):
+            if messages is not None:
+                return 5
+            if text is not None:
+                return 7
+            return 0
+
+        mock_token_counter.side_effect = _side_effect
+        mock_params.return_value = {"model": "gpt-4", "api_key": "sk-x"}
+        usage = SimpleNamespace(
+            prompt_tokens=0,
+            completion_tokens=0,
+            total_tokens=0,
+        )
+        message = SimpleNamespace(content="hello")
+        choice = SimpleNamespace(message=message)
+        mock_litellm.completion.return_value = SimpleNamespace(
+            choices=[choice],
+            usage=usage,
+            model="gpt-4",
+            _hidden_params={},
+        )
+
+        content, usage_dict = LLMTracker.call_and_track(
+            messages=[{"role": "user", "content": "hi"}]
+        )
+
+        assert content == "hello"
+        assert usage_dict["prompt_tokens"] == 5
+        assert usage_dict["completion_tokens"] == 7
+        assert usage_dict["total_tokens"] == 12
+        save_kwargs = mock_save_usage.call_args.kwargs
+        assert save_kwargs["prompt_tokens"] == 5
+        assert save_kwargs["completion_tokens"] == 7
+        assert save_kwargs["total_tokens"] == 12
+
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.LLMTracker"
+        "._save_usage_to_db"
+    )
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.litellm"
+    )
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.get_litellm_params"
+    )
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm_usage.token_counter"
+    )
+    def test_sync_fallback_guards_min_completion_token_when_token_counter_fails(
+        self, mock_token_counter, mock_params, mock_litellm, mock_save_usage
+    ):
+        def _side_effect(
+            *,
+            model,
+            custom_tokenizer=None,
+            text=None,
+            messages=None,
+            **_kwargs,
+        ):
+            raise RuntimeError("boom")
+
+        mock_token_counter.side_effect = _side_effect
+        mock_params.return_value = {"model": "gpt-4", "api_key": "sk-x"}
+        usage = SimpleNamespace(
+            prompt_tokens=0,
+            completion_tokens=0,
+            total_tokens=0,
+        )
+        message = SimpleNamespace(content="hello")
+        choice = SimpleNamespace(message=message)
+        mock_litellm.completion.return_value = SimpleNamespace(
+            choices=[choice],
+            usage=usage,
+            model="gpt-4",
+            _hidden_params={},
+        )
+
+        _content, usage_dict = LLMTracker.call_and_track(
+            messages=[{"role": "user", "content": "hi"}]
+        )
+
+        assert usage_dict["completion_tokens"] == 1
+        assert usage_dict["total_tokens"] == 1
+
+
+@pytest.mark.unit
+class TestCallAndTrackStreaming:
+    """
+    call_and_track(stream=True) yields chunks and calls _save_usage_to_db with
+    is_streaming=True and first_chunk_at when first non-empty content arrives.
+    """
+
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.LLMTracker"
+        "._save_usage_to_db"
+    )
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.litellm"
+    )
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.get_litellm_params"
+    )
+    def test_stream_true_yields_chunks_and_saves_with_is_streaming(
+        self, mock_params, mock_litellm, mock_save_usage
+    ):
+        mock_params.return_value = {"model": "gpt-4", "api_key": "sk-x"}
+        delta1 = SimpleNamespace(content="Hello")
+        delta2 = SimpleNamespace(content=" world")
+        choice1 = SimpleNamespace(delta=delta1)
+        choice2 = SimpleNamespace(delta=delta2)
+        usage_ns = SimpleNamespace(
+            prompt_tokens=1,
+            completion_tokens=2,
+            total_tokens=3,
+        )
+        chunk1 = SimpleNamespace(choices=[choice1], usage=None, model="gpt-4")
+        chunk2 = SimpleNamespace(choices=[choice2], usage=usage_ns, model="gpt-4")
+        mock_litellm.completion.return_value = iter([chunk1, chunk2])
+
+        gen = LLMTracker.call_and_track(
+            messages=[{"role": "user", "content": "hi"}],
+            stream=True,
+        )
+        chunks = []
+        try:
+            while True:
+                chunks.append(next(gen))
+        except StopIteration as e:
+            usage_return = e.value
+        assert chunks == [("content", "Hello"), ("content", "world")]
+        assert usage_return is not None
+        assert usage_return.get("model") == "gpt-4"
+        assert mock_save_usage.called
+        save_kwargs = mock_save_usage.call_args.kwargs
+        assert save_kwargs["is_streaming"] is True
+        assert save_kwargs.get("first_chunk_at") is not None
+
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.LLMTracker"
+        "._save_usage_to_db"
+    )
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.litellm"
+    )
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.get_litellm_params"
+    )
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm_usage.token_counter"
+    )
+    def test_stream_fallback_counts_tokens_from_streamed_content(
+        self, mock_token_counter, mock_params, mock_litellm, mock_save_usage
+    ):
+        def _side_effect(
+            *,
+            model,
+            custom_tokenizer=None,
+            text=None,
+            messages=None,
+            **_kwargs,
+        ):
+            if messages is not None:
+                return 3
+            if text is not None:
+                return 8
+            return 0
+
+        mock_token_counter.side_effect = _side_effect
+        mock_params.return_value = {"model": "gpt-4", "api_key": "sk-x"}
+        delta1 = SimpleNamespace(content="Hello")
+        delta2 = SimpleNamespace(content=" world")
+        choice1 = SimpleNamespace(delta=delta1)
+        choice2 = SimpleNamespace(delta=delta2)
+        chunk1 = SimpleNamespace(choices=[choice1], usage=None, model="gpt-4")
+        chunk2 = SimpleNamespace(choices=[choice2], usage=None, model="gpt-4")
+        mock_litellm.completion.return_value = iter([chunk1, chunk2])
+
+        gen = LLMTracker.call_and_track(
+            messages=[{"role": "user", "content": "hi"}],
+            stream=True,
+        )
+        try:
+            while True:
+                next(gen)
+        except StopIteration as e:
+            usage_return = e.value
+
+        assert usage_return["prompt_tokens"] == 3
+        assert usage_return["completion_tokens"] == 8
+        assert usage_return["total_tokens"] == 11
+        save_kwargs = mock_save_usage.call_args.kwargs
+        assert save_kwargs["prompt_tokens"] == 3
+        assert save_kwargs["completion_tokens"] == 8
+        assert save_kwargs["total_tokens"] == 11

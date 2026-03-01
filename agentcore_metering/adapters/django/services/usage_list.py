@@ -1,10 +1,8 @@
-"""
-LLM usage records listing for admin (read-only, paginated).
-"""
+"""LLM usage records listing for admin (read-only, paginated)."""
 from typing import Any, Dict, List, Optional
 
 from agentcore_metering.adapters.django.models import LLMUsage
-from agentcore_metering.adapters.django.services.usage_stats import (
+from agentcore_metering.adapters.django.services.usage_aggregation import (
     _parse_date,
     _parse_end_date,
 )
@@ -74,15 +72,26 @@ def get_llm_usage_list(
         if u.cost is not None:
             cost = float(u.cost)
         e2e_latency_sec = None
-        output_tps = None
+        ttft_sec = None
         if u.started_at and u.created_at:
             delta = u.created_at - u.started_at
             e2e_latency_sec = max(0.0, delta.total_seconds())
-            if e2e_latency_sec > 0 and u.completion_tokens is not None:
-                output_tps = round(
-                    float(u.completion_tokens) / e2e_latency_sec, 2
-                )
-        items.append({
+        if (
+            u.is_streaming
+            and u.first_chunk_at is not None
+            and u.started_at is not None
+        ):
+            ttft_delta = u.first_chunk_at - u.started_at
+            ttft_sec = max(0.0, ttft_delta.total_seconds())
+        # output_tps = completion_tokens / e2e_latency (stream and non-stream)
+        output_tps = None
+        if (
+            e2e_latency_sec is not None
+            and e2e_latency_sec > 0
+            and u.completion_tokens is not None
+        ):
+            output_tps = round(float(u.completion_tokens) / e2e_latency_sec, 2)
+        item: Dict[str, Any] = {
             "id": str(u.id),
             "user_id": u.user_id,
             "username": username,
@@ -99,7 +108,11 @@ def get_llm_usage_list(
             "e2e_latency_sec": e2e_latency_sec,
             "output_tps": output_tps,
             "metadata": u.metadata,
-        })
+        }
+        if ttft_sec is not None:
+            item["ttft_sec"] = ttft_sec
+        item["latency_sec"] = e2e_latency_sec
+        items.append(item)
 
     return {
         "results": items,

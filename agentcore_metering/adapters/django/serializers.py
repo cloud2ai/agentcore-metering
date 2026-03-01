@@ -193,6 +193,28 @@ class TokenStatsSeriesSerializer(serializers.Serializer):
     items = TokenStatsSeriesItemSerializer(many=True)
 
 
+class TokenStatsSeriesByModelItemSerializer(serializers.Serializer):
+    """
+    One (bucket, model) row from pre-aggregated LLMUsageSeries.
+    Used for performance curves (e2e, ttft, output_tps), token and cost trend.
+    """
+
+    bucket = serializers.CharField(allow_null=True)
+    model = serializers.CharField()
+    call_count = serializers.IntegerField()
+    success_count = serializers.IntegerField()
+    avg_e2e_latency_sec = serializers.FloatField(allow_null=True)
+    avg_ttft_sec = serializers.FloatField(allow_null=True)
+    avg_output_tps = serializers.FloatField(allow_null=True)
+    total_prompt_tokens = serializers.IntegerField()
+    total_completion_tokens = serializers.IntegerField()
+    total_tokens = serializers.IntegerField()
+    total_cached_tokens = serializers.IntegerField()
+    total_reasoning_tokens = serializers.IntegerField()
+    total_cost = serializers.FloatField(allow_null=True)
+    cost_currency = serializers.CharField()
+
+
 class TokenStatsResponseSerializer(serializers.Serializer):
     """Full response shape for GET .../token-stats/."""
 
@@ -210,6 +232,46 @@ class TokenStatsResponseSerializer(serializers.Serializer):
             "Present only when granularity is set "
             "(day=hourly, month=daily, year=monthly)",
         ),
+    )
+    series_by_model = TokenStatsSeriesByModelItemSerializer(
+        many=True,
+        required=False,
+        allow_null=True,
+        help_text=(
+            "Pre-aggregated (bucket, model) series when use_series=1 and "
+            "granularity + date range set; for performance and cost charts.",
+        ),
+    )
+    expected_buckets = serializers.ListField(
+        child=serializers.CharField(),
+        required=False,
+        allow_null=True,
+        help_text=(
+            "Full ordered bucket list (ISO) for granularity and range; "
+            "charts use this for complete x-axis."
+        ),
+    )
+
+
+class MeteringConfigSerializer(serializers.Serializer):
+    """Effective metering config (GET response)."""
+
+    retention_days = serializers.IntegerField(min_value=1)
+    cleanup_enabled = serializers.BooleanField()
+    cleanup_crontab = serializers.CharField()
+    aggregation_crontab = serializers.CharField()
+
+
+class MeteringConfigUpdateSerializer(serializers.Serializer):
+    """Request body for PATCH metering config (optional fields)."""
+
+    retention_days = serializers.IntegerField(
+        min_value=1, max_value=3650, required=False
+    )
+    cleanup_enabled = serializers.BooleanField(required=False)
+    cleanup_crontab = serializers.CharField(required=False, allow_blank=False)
+    aggregation_crontab = serializers.CharField(
+        required=False, allow_blank=False
     )
 
 
@@ -264,6 +326,14 @@ class TestCallRequestSerializer(serializers.Serializer):
         min_value=1,
         max_value=4096,
         help_text="Max tokens for the completion (default 512, max 4096)",
+    )
+    stream = serializers.BooleanField(
+        required=False,
+        default=False,
+        help_text=(
+            "If true, response is SSE stream "
+            "(chunk events then done with usage)."
+        ),
     )
 
     def validate(self, attrs):

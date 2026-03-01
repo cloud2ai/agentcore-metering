@@ -1,11 +1,9 @@
 """
-LLM Usage Statistics utilities for admin cost analysis.
+LLM usage aggregation for admin cost analysis (summary, by_model, time series).
 
-All date/time ranges and time-series buckets are interpreted and returned
-in the server's local timezone (see _ensure_aware_datetime). Use consistent
-start_date/end_date in that timezone when querying.
+TIME_ZONE is UTC; date ranges and bucket values are in UTC. Frontend converts.
 """
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone as utc_tz
 from typing import Any, Optional
 
 from django.db.models import Count, Q, Sum
@@ -31,13 +29,60 @@ def _parse_date(value: Optional[str]) -> Optional[datetime]:
 
 
 def _ensure_aware_datetime(dt: datetime) -> datetime:
-    """
-    Normalize to timezone-aware datetime in local timezone.
-    Stats (buckets, ranges) are reported in local timezone for consistency.
-    """
+    """Normalize to timezone-aware UTC for query range."""
     if timezone.is_naive(dt):
-        return timezone.make_aware(dt, timezone.get_current_timezone())
-    return timezone.localtime(dt, timezone.get_current_timezone())
+        return timezone.make_aware(dt, utc_tz.utc)
+    return dt.astimezone(utc_tz.utc)
+
+
+def _bucket_key_for_fill(
+    bucket: date | datetime | None,
+    granularity: str,
+) -> str | None:
+    """
+    Normalize bucket to a string key for fill lookup so DB and expected match.
+
+    We build by_bucket from DB rows and look up by the key from
+    _build_expected_buckets. If the two sides use different string formats,
+    by_bucket.get(bucket_str) returns None and that bucket is filled with
+    zeros, so the whole series can appear as zero.
+
+    Typical scenario (SQLite): the DB returns naive datetime from
+    TruncHour/TruncMonth so r["bucket"].isoformat() is "2026-02-21T03:00:00"
+    (no timezone). Our expected buckets are timezone-aware UTC, so
+    bucket.isoformat() is "2026-02-21T03:00:00+00:00". The strings differ and
+    the lookup fails. PostgreSQL with USE_TZ=True usually returns aware
+    datetimes so keys may match without this, but normalization keeps behavior
+    consistent across backends.
+
+    Other cases: TruncDate (month granularity) may return a date while we
+    generate datetime; or microsecond/format differences. This function
+    unifies to the same key shape per granularity (hour -> aware UTC no
+    microsecond; month -> date iso; year -> first-of-month aware UTC).
+    """
+    if bucket is None:
+        return None
+    if granularity == "month":
+        d = bucket.date() if isinstance(bucket, datetime) else bucket
+        return d.isoformat()
+    if granularity == "year":
+        if isinstance(bucket, datetime):
+            dt = _ensure_aware_datetime(bucket)
+        else:
+            dt = datetime(
+                bucket.year, bucket.month, 1,
+                tzinfo=utc_tz.utc,
+            )
+        dt = dt.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        return dt.isoformat()
+    if isinstance(bucket, datetime):
+        dt = _ensure_aware_datetime(bucket)
+    else:
+        dt = datetime.combine(
+            bucket, datetime.min.time()
+        ).replace(tzinfo=utc_tz.utc)
+    dt = dt.replace(microsecond=0)
+    return dt.isoformat()
 
 
 def _parse_end_date(value: Optional[str]) -> Optional[datetime]:
@@ -175,10 +220,7 @@ def get_time_series_stats(
 
     def _row(i):
         bucket = i["bucket"]
-        if bucket is None:
-            bucket_str = None
-        else:
-            bucket_str = bucket.isoformat()
+        bucket_str = bucket.isoformat() if bucket is not None else None
         cost = i.get("total_cost")
         cost = float(cost) if cost is not None else 0
         return {
@@ -192,23 +234,22 @@ def get_time_series_stats(
             "total_cost": cost,
         }
 
-    rows = [_row(r) for r in qs]
+    rows_list = list(qs)
+    rows = [_row(r) for r in rows_list]
     if not start_date or not end_date:
         return rows
 
-    # Fill missing buckets so the series is contiguous. Bucket key must match
-    # the annotation: day -> TruncHour (datetime), month -> TruncDate (date),
-    # year -> TruncMonth (datetime, first day of month).
-    # _build_expected_buckets returns the same types so bucket.isoformat()
-    # aligns with by_bucket keys.
     filled = []
-    by_bucket = {row["bucket"]: row for row in rows}
+    by_bucket = {
+        _bucket_key_for_fill(r["bucket"], granularity): _row(r)
+        for r in rows_list
+    }
     for bucket in _build_expected_buckets(
         granularity=granularity,
         start_date=start_date,
         end_date=end_date,
     ):
-        bucket_str = bucket.isoformat()
+        bucket_str = _bucket_key_for_fill(bucket, granularity)
         filled.append(
             by_bucket.get(bucket_str)
             or {
@@ -268,15 +309,14 @@ def _day_buckets(start_date: datetime, end_date: datetime) -> list[date]:
 
 def _month_buckets(start_date: datetime, end_date: datetime) -> list[datetime]:
     start_date = _ensure_aware_datetime(start_date)
-    end_date = _ensure_aware_datetime(end_date)
-    current = start_date.replace(
-        day=1,
-        hour=0,
-        minute=0,
-        second=0,
-        microsecond=0,
+    end_year = end_date.year
+    end_month = end_date.month
+    end = datetime(
+        end_year, end_month, 1,
+        hour=0, minute=0, second=0, microsecond=0,
+        tzinfo=utc_tz.utc,
     )
-    end = end_date.replace(
+    current = start_date.replace(
         day=1,
         hour=0,
         minute=0,
@@ -297,13 +337,24 @@ def get_token_stats_from_query(params: Any) -> dict:
     """
     Build token stats dict from query params (e.g. request.query_params).
     Raises ValueError for unsupported granularity.
+    When use_series=1 and granularity and date range are set, also returns
+    series_by_model from the pre-aggregated LLMUsageSeries table.
     """
+    # NOTE(Ray): Lazy import to avoid circular import (usage_chart_series
+    # imports usage_aggregation._ensure_aware_datetime).
+    from agentcore_metering.adapters.django.services import (
+        usage_chart_series,
+    )
+
     start_date = _parse_date(params.get("start_date"))
     end_date = _parse_end_date(params.get("end_date"))
     user_id = params.get("user_id") or None
     if user_id is not None and str(user_id).strip() == "":
         user_id = None
     granularity = params.get("granularity")
+    use_series = (
+        str(params.get("use_series") or "").strip() in ("1", "true", "yes")
+    )
 
     summary = get_summary_stats(
         start_date=start_date, end_date=end_date, user_id=user_id
@@ -316,6 +367,16 @@ def get_token_stats_from_query(params: Any) -> dict:
         i["total_cost"] = float(cost) if cost is not None else 0
         i["total_cost_currency"] = "USD"
     series = None
+    expected_buckets = None
+    if granularity and start_date and end_date:
+        expected_buckets = [
+            b.isoformat() if b is not None else None
+            for b in _build_expected_buckets(
+                granularity=granularity,
+                start_date=start_date,
+                end_date=end_date,
+            )
+        ]
     if granularity:
         series_items = get_time_series_stats(
             granularity=granularity,
@@ -327,8 +388,41 @@ def get_token_stats_from_query(params: Any) -> dict:
             "granularity": (granularity or "").strip().lower(),
             "items": series_items,
         }
-    return {
+    result = {
         "summary": summary,
         "by_model": by_model,
         "series": series,
+        "expected_buckets": expected_buckets,
     }
+    if use_series and granularity and start_date and end_date:
+        try:
+            result["series_by_model"] = (
+                usage_chart_series.get_series_for_charts_with_fallback(
+                    granularity=granularity,
+                    start_date=start_date,
+                    end_date=end_date,
+                )
+            )
+            series_total_calls = sum(
+                r.get("call_count") or 0 for r in result["series_by_model"]
+            )
+            if (
+                summary["total_calls"] > 0
+                and series_total_calls < summary["total_calls"] * 0.5
+            ):
+                series_gran = (
+                    usage_chart_series.VIEW_TO_SERIES_GRANULARITY.get(
+                        (granularity or "").strip().lower()
+                    )
+                )
+                if series_gran:
+                    result["series_by_model"] = (
+                        usage_chart_series._compute_series_from_usage(
+                            granularity=series_gran,
+                            start_date=start_date,
+                            end_date=end_date,
+                        )
+                    )
+        except ValueError:
+            result["series_by_model"] = []
+    return result
