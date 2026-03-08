@@ -77,14 +77,13 @@ def cleanup_old_llm_usage_task(
             task_id, TaskStatus.SUCCESS, result=out
         )
         logger.info(
-            "Finished cleanup_old_llm_usage_task "
-            "deleted_usage=%s deleted_series=%s",
-            out.get("deleted_usage", 0),
-            out.get("deleted_series", 0),
+            f"Finished cleanup_old_llm_usage_task "
+            f"deleted_usage={out.get('deleted_usage', 0)} "
+            f"deleted_series={out.get('deleted_series', 0)}"
         )
         return out
     except Exception as e:
-        logger.exception("Failed cleanup_old_llm_usage_task: %s", e)
+        logger.exception(f"Failed cleanup_old_llm_usage_task: {e}")
         TaskTracker.update_task_status(
             task_id,
             TaskStatus.FAILURE,

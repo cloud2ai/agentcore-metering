@@ -32,8 +32,8 @@ def cleanup_old_llm_usage(
 
     if retention_days <= 0:
         logger.warning(
-            "cleanup_old_llm_usage: retention_days=%s <= 0, skipping",
-            retention_days,
+            f"cleanup_old_llm_usage: retention_days={retention_days} <= 0, "
+            "skipping"
         )
         return {
             "deleted_usage": 0,
@@ -80,11 +80,8 @@ def cleanup_old_llm_usage(
             deleted_series += n
 
     logger.info(
-        "cleanup_old_llm_usage: deleted_usage=%s deleted_series=%s "
-        "retention_days=%s",
-        deleted_usage,
-        deleted_series,
-        retention_days,
+        f"cleanup_old_llm_usage: deleted_usage={deleted_usage} "
+        f"deleted_series={deleted_series} retention_days={retention_days}"
     )
     return {
         "deleted_usage": deleted_usage,

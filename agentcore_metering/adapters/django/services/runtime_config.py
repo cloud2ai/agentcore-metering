@@ -458,9 +458,21 @@ def run_test_call_stream(
         stream=True,
     )
     usage = None
+    chunk_count = 0
     try:
         while True:
             chunk = next(gen)
+            chunk_count += 1
+            if chunk_count == 1:
+                logger.info(
+                    f"run_test_call (stream) first chunk received "
+                    f"config_uuid={config_uuid_value}"
+                )
+            elif chunk_count % 20 == 0:
+                logger.info(
+                    f"run_test_call (stream) chunk #{chunk_count} "
+                    f"config_uuid={config_uuid_value}"
+                )
             yield chunk
     except StopIteration as e:
         usage = e.value
@@ -479,7 +491,8 @@ def run_test_call_stream(
         }
     logger.info(
         f"Finished {TASK_RUN_TEST_CALL} (stream) "
-        f"config_uuid={config_uuid_value} config_id={config_id_value}"
+        f"config_uuid={config_uuid_value} config_id={config_id_value} "
+        f"chunks={chunk_count}"
     )
     return usage_dict
 

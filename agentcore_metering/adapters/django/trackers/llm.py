@@ -397,6 +397,68 @@ class LLMTracker:
         last_chunk = None
         streamed_content_len = 0
         streamed_content = ""
+        logged_unknown_shape = False
+
+        def _extract_text(value: Any) -> str:
+            """
+            Central place to adapt provider-specific stream chunk formats.
+            When new providers or SDKs return different structures, extend
+            only here so the upstream (kind, text) contract stays unchanged.
+            Extracts user-visible text from LiteLLM stream delta fields.
+
+            Recommended LiteLLM streaming format (OpenAI ChatCompletions):
+            https://docs.litellm.ai/docs/
+
+            In the standard contract, text is streamed via:
+            - chunk.choices[0].delta.content (str)
+            - optionally chunk.choices[0].delta.reasoning_content (str)
+
+            Everything else should be treated as a non-standard shape. We
+            keep a minimal best-effort fallback for safety, but the primary
+            path must follow the documented OpenAI-compatible structure.
+
+            Different providers/deployments may return:
+            - str
+            - list of parts (dict/object) with text-like fields
+            - other objects that stringify to something non-useful
+            """
+            if value is None:
+                return ""
+            if isinstance(value, str):
+                return value
+            if isinstance(value, list):
+                parts: list[str] = []
+                for part in value:
+                    if part is None:
+                        continue
+                    if isinstance(part, str):
+                        parts.append(part)
+                        continue
+                    if isinstance(part, dict):
+                        text = (
+                            part.get("text")
+                            or part.get("content")
+                            or part.get("value")
+                        )
+                        if isinstance(text, str) and text:
+                            parts.append(text)
+                        continue
+                    text = (
+                        getattr(part, "text", None)
+                        or getattr(part, "content", None)
+                        or getattr(part, "value", None)
+                    )
+                    if isinstance(text, str) and text:
+                        parts.append(text)
+                return "".join(parts)
+            text = (
+                getattr(value, "text", None)
+                or getattr(value, "content", None)
+                or getattr(value, "value", None)
+            )
+            if isinstance(text, str):
+                return text
+            return ""
 
         def _build_usage_and_save(
             _usage: Dict[str, Any],
@@ -456,6 +518,30 @@ class LLMTracker:
                 response_model=response_model_raw,
             )
 
+        def _handle_stream_stop() -> None:
+            """
+            Handle GeneratorExit when client stops consuming the stream.
+            """
+            usage_partial = (
+                usage_from_stream_chunk(last_chunk, model)
+                if last_chunk
+                else _default_usage_dict(model)
+            )
+            _build_usage_and_save(
+                usage_partial,
+                last_chunk,
+                streamed_content,
+                first_chunk_at,
+                success=True,
+                error=None,
+            )
+            logger.info(
+                f"Stream stopped by client (stream) "
+                f"node_name={node_name} model={model} "
+                f"streamed_len={streamed_content_len}"
+            )
+            raise
+
         try:
             stream_params = {
                 **params,
@@ -467,7 +553,16 @@ class LLMTracker:
                 last_chunk = chunk
                 choices = getattr(chunk, "choices", None) or []
                 choice = choices[0] if choices else None
-                if not choice or not getattr(choice, "delta", None):
+                if not choice:
+                    continue
+                if not getattr(choice, "delta", None):
+                    if not logged_unknown_shape:
+                        logger.warning(
+                            f"LLM stream chunk missing choice.delta; "
+                            f"expected OpenAI-compatible streaming format. "
+                            f"model={model} choice_type={type(choice).__name__}"
+                        )
+                        logged_unknown_shape = True
                     continue
                 delta = choice.delta
                 reasoning_raw = (
@@ -475,7 +570,8 @@ class LLMTracker:
                     or getattr(delta, "reasoning", None)
                 )
                 if reasoning_raw is not None:
-                    text = str(reasoning_raw).strip()
+                    text = _extract_text(reasoning_raw)
+                    text = str(text).strip() if text else ""
                     if text:
                         streamed_content_len += len(text)
                         streamed_content += text
@@ -484,28 +580,11 @@ class LLMTracker:
                         try:
                             yield ("reasoning", text)
                         except GeneratorExit:
-                            usage_partial = (
-                                usage_from_stream_chunk(last_chunk, model)
-                                if last_chunk
-                                else _default_usage_dict(model)
-                            )
-                            _build_usage_and_save(
-                                usage_partial,
-                                last_chunk,
-                                streamed_content,
-                                first_chunk_at,
-                                success=True,
-                                error=None,
-                            )
-                            logger.info(
-                                f"Stream stopped by client (stream) "
-                                f"node_name={node_name} model={model} "
-                                f"streamed_len={streamed_content_len}"
-                            )
-                            raise
+                            _handle_stream_stop()
                 content = getattr(delta, "content", None)
                 if content is not None:
-                    text = str(content).strip()
+                    text = _extract_text(content)
+                    text = str(text).strip() if text else ""
                     if text:
                         streamed_content_len += len(text)
                         streamed_content += text
@@ -514,25 +593,15 @@ class LLMTracker:
                         try:
                             yield ("content", text)
                         except GeneratorExit:
-                            usage_partial = (
-                                usage_from_stream_chunk(last_chunk, model)
-                                if last_chunk
-                                else _default_usage_dict(model)
-                            )
-                            _build_usage_and_save(
-                                usage_partial,
-                                last_chunk,
-                                streamed_content,
-                                first_chunk_at,
-                                success=True,
-                                error=None,
-                            )
-                            logger.info(
-                                f"Stream stopped by client (stream) "
-                                f"node_name={node_name} model={model} "
-                                f"streamed_len={streamed_content_len}"
-                            )
-                            raise
+                            _handle_stream_stop()
+                    elif not logged_unknown_shape:
+                        logger.warning(
+                            f"LLM stream delta.content had unsupported type; "
+                            f"expected str per LiteLLM docs. model={model} "
+                            f"delta_type={type(delta).__name__} "
+                            f"content_type={type(content).__name__}"
+                        )
+                        logged_unknown_shape = True
             usage = (
                 usage_from_stream_chunk(last_chunk, model)
                 if last_chunk

@@ -72,10 +72,8 @@ def get_cost_from_response(response: Any) -> Optional[Decimal]:
         except (TypeError, ValueError, InvalidOperation):
             model = getattr(response, "model", "unknown")
             logger.warning(
-                "Invalid response_cost in hidden params "
-                "model=%s response_cost=%s",
-                model,
-                cost,
+                f"Invalid response_cost in hidden params "
+                f"model={model} response_cost={cost}"
             )
             return None
     return None
@@ -164,8 +162,8 @@ def usage_from_stream_chunk(chunk: Any, fallback_model: str) -> Dict[str, Any]:
     cost = None
     try:
         cost = get_cost_from_response(chunk)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"get_cost_from_response(chunk) failed: {e}")
     usage["cost"] = float(cost) if cost is not None else None
     return usage
 

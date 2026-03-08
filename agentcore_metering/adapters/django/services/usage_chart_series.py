@@ -206,11 +206,8 @@ def aggregate_usage_to_series(
                 },
             )
     logger.info(
-        "aggregate_usage_to_series granularity=%s range=[%s, %s] upserted=%d",
-        granularity,
-        start_date,
-        end_date,
-        len(rows_to_upsert),
+        f"aggregate_usage_to_series granularity={granularity} "
+        f"range=[{start_date}, {end_date}] upserted={len(rows_to_upsert)}"
     )
     return len(rows_to_upsert)
 

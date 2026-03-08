@@ -173,15 +173,12 @@ def aggregate_llm_usage_series_task(
                 task_id, TaskStatus.SUCCESS, result=out
             )
             logger.info(
-                "Finished aggregate_llm_usage_series_task total_upserted=%s",
-                total,
+                f"Finished aggregate_llm_usage_series_task total_upserted={total}"
             )
             return out
         except Exception as e:
             logger.exception(
-                "aggregate_llm_usage_series_task granularity=%s failed: %s",
-                gran,
-                e,
+                f"aggregate_llm_usage_series_task granularity={gran} failed: {e}"
             )
             TaskTracker.update_task_status(
                 task_id,
@@ -198,8 +195,7 @@ def aggregate_llm_usage_series_task(
         SERIES_GRANULARITY_MONTH,
     ):
         logger.warning(
-            "aggregate_llm_usage_series_task: invalid granularity=%s",
-            granularity,
+            f"aggregate_llm_usage_series_task: invalid granularity={granularity}"
         )
         out = {"upserted": 0, "error": "invalid_granularity"}
         TaskTracker.update_task_status(
@@ -213,16 +209,12 @@ def aggregate_llm_usage_series_task(
             task_id, TaskStatus.SUCCESS, result=out
         )
         logger.info(
-            "Finished aggregate_llm_usage_series_task granularity=%s "
-            "upserted=%s",
-            granularity,
-            n,
+            f"Finished aggregate_llm_usage_series_task granularity={granularity} "
+            f"upserted={n}"
         )
         return out
     except Exception as e:
-        logger.exception(
-            "aggregate_llm_usage_series_task failed: %s", e
-        )
+        logger.exception(f"aggregate_llm_usage_series_task failed: {e}")
         TaskTracker.update_task_status(
             task_id,
             TaskStatus.FAILURE,
