@@ -6,6 +6,8 @@ Applies LiteLLM global retry and timeout at module load. Handles
 AuthenticationError, RateLimitError, and APIError with distinct logging.
 """
 import logging
+import json
+import time
 from datetime import datetime
 from decimal import Decimal
 from typing import Any, Dict, Generator, Optional, Tuple, Union
@@ -14,6 +16,7 @@ from django.db import transaction
 from django.utils import timezone
 import litellm
 from litellm import APIError, AuthenticationError, RateLimitError
+from json_repair import repair_json
 
 from agentcore_metering.adapters.django.models import LLMUsage
 from agentcore_metering.adapters.django.services.runtime_config import (
@@ -33,6 +36,7 @@ from agentcore_metering.constants import (
 logger = logging.getLogger(__name__)
 
 TASK_LLM_CALL = "llm_call"
+JSON_RETRY_BASE_DELAY_SECONDS = 0.5
 
 litellm.num_retries = LITELLM_NUM_RETRIES
 litellm.request_timeout = LITELLM_REQUEST_TIMEOUT
@@ -89,6 +93,46 @@ def _record_failed_llm_call(
     )
 
 
+def _repair_json_obj(content: str) -> str:
+    """
+    Repair and validate LLM JSON output as an object.
+
+    Returns repaired JSON string when validation succeeds.
+    Raises ValueError when content cannot be repaired to valid JSON object.
+    """
+    if not content or not str(content).strip():
+        raise ValueError("LLM returned empty response")
+
+    normalized = str(content).strip()
+    if normalized.startswith("```json"):
+        normalized = normalized[7:]
+    if normalized.startswith("```"):
+        normalized = normalized[3:]
+    if normalized.endswith("```"):
+        normalized = normalized[:-3]
+    normalized = normalized.strip()
+
+    try:
+        repaired = repair_json(normalized)
+    except Exception as e:
+        raise ValueError(f"JSON repair failed: {e}") from e
+
+    try:
+        parsed = json.loads(repaired)
+    except json.JSONDecodeError as e:
+        raise ValueError(
+            f"Failed to parse JSON after repair: {e.msg} "
+            f"at line {e.lineno} column {e.colno}"
+        ) from e
+
+    if not isinstance(parsed, dict):
+        raise ValueError(
+            f"LLM returned {type(parsed).__name__} instead of object"
+        )
+
+    return repaired
+
+
 class LLMTracker:
     """
     LLM call tracker via LiteLLM with usage and cost (reference pricing).
@@ -106,6 +150,8 @@ class LLMTracker:
         state: Optional[Dict] = None,
         model_uuid: Optional[str] = None,
         stream: bool = False,
+        json_repair: Optional[bool] = None,
+        json_attempts: int = 3,
     ) -> Union[
         Tuple[str, Dict[str, Any]],
         Generator[str, None, Dict[str, Any]],
@@ -152,13 +198,23 @@ class LLMTracker:
             **(state or {}),
             "node_name": (state_node if state_node else node_name),
         }
-        request_started_at = timezone.now()
         logger.info(
             f"Starting {TASK_LLM_CALL} node_name={node_name} "
             f"model={model} message_count={len(messages)}"
         )
+        do_json_repair = (
+            json_mode if json_repair is None
+            else json_repair
+        )
+        max_json_attempts = max(1, int(json_attempts))
 
         if stream:
+            if do_json_repair and json_mode:
+                logger.warning(
+                    "JSON repair is skipped for streaming "
+                    f"calls; node_name={node_name}"
+                )
+            request_started_at = timezone.now()
             return LLMTracker._call_and_track_stream(
                 params=params,
                 effective_state=effective_state,
@@ -167,7 +223,56 @@ class LLMTracker:
                 state=state,
                 model=model,
             )
+        if not do_json_repair or not json_mode:
+            return LLMTracker._call_and_track_non_stream_once(
+                params=params,
+                effective_state=effective_state,
+                node_name=node_name,
+                state=state,
+                model=model,
+            )
 
+        total_attempts = max_json_attempts
+        last_error: Optional[ValueError] = None
+        for attempt_idx in range(total_attempts):
+            content, usage = LLMTracker._call_and_track_non_stream_once(
+                params=params,
+                effective_state=effective_state,
+                node_name=node_name,
+                state=state,
+                model=model,
+            )
+            try:
+                repaired_content = _repair_json_obj(content)
+                return repaired_content, usage
+            except ValueError as e:
+                last_error = e
+                if attempt_idx >= total_attempts - 1:
+                    break
+                delay_seconds = JSON_RETRY_BASE_DELAY_SECONDS * (2 ** attempt_idx)
+                logger.warning(
+                    f"JSON parse validation failed "
+                    f"(attempt {attempt_idx + 1}/{total_attempts}) "
+                    f"node_name={node_name}: {e}. "
+                    f"Retrying in {delay_seconds:.1f}s"
+                )
+                time.sleep(delay_seconds)
+
+        raise ValueError(
+            f"[{node_name}] Invalid JSON response after {total_attempts} "
+            f"attempts: {last_error}"
+        )
+
+    @staticmethod
+    def _call_and_track_non_stream_once(
+        params: Dict[str, Any],
+        effective_state: Dict[str, Any],
+        node_name: str,
+        state: Optional[Dict],
+        model: str,
+    ) -> Tuple[str, Dict[str, Any]]:
+        """Single non-stream LLM call + metering persistence."""
+        request_started_at = timezone.now()
         try:
             response = litellm.completion(**params)
 

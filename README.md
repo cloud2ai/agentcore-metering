@@ -63,6 +63,8 @@ pytest tests -v
    ```
    - `state` is optional (task/user context).
    - If `state` contains `user_id`, per-user LLM config (if set) is used. Pass `model_uuid` to use a specific config; otherwise the earliest enabled model is used.
+   - For `json_mode=True` (non-stream), tracker does JSON repair + validation and retries by default (`json_attempts=3`; configurable).
+   - For `stream=True`, JSON repair is skipped (stream output is unchanged).
 3. **Config**
    - All config can be managed by admin APIs (global defaults + optional per-user overrides).
    - When model_uuid is not provided, resolution uses the earliest enabled config (by is_default then created_at): user scope -> global scope; no settings fallback, raises if no DB config.

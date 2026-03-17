@@ -1,9 +1,10 @@
 """
 Tests for trackers.llm.LLMTracker (LiteLLM): call_and_track exception paths.
 """
+from datetime import datetime
+from types import SimpleNamespace
 import pytest
 from unittest.mock import MagicMock, patch
-from types import SimpleNamespace
 
 from agentcore_metering.adapters.django import LLMTracker
 
@@ -315,6 +316,128 @@ class TestCallAndTrackTokenFallback:
 
         assert usage_dict["completion_tokens"] == 1
         assert usage_dict["total_tokens"] == 1
+
+
+@pytest.mark.unit
+class TestCallAndTrackJsonRepairRetry:
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.time.sleep"
+    )
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.timezone.now"
+    )
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.LLMTracker"
+        "._save_usage_to_db"
+    )
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.litellm"
+    )
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.get_litellm_params"
+    )
+    def test_json_mode_retries_and_succeeds(
+        self,
+        mock_params,
+        mock_litellm,
+        mock_save_usage,
+        mock_now,
+        mock_sleep,
+    ):
+        mock_params.return_value = {"model": "gpt-4", "api_key": "sk-x"}
+        mock_now.side_effect = [
+            datetime(2026, 3, 17, 10, 0, 0),
+            datetime(2026, 3, 17, 10, 0, 1),
+        ]
+
+        usage = SimpleNamespace(
+            prompt_tokens=10,
+            completion_tokens=5,
+            total_tokens=15,
+        )
+        choice_bad = SimpleNamespace(message=SimpleNamespace(content=":"))
+        choice_ok = SimpleNamespace(
+            message=SimpleNamespace(content='{"cleaned_content":"ok"}')
+        )
+        response_bad = SimpleNamespace(
+            choices=[choice_bad],
+            usage=usage,
+            model="gpt-4",
+            _hidden_params={},
+        )
+        response_ok = SimpleNamespace(
+            choices=[choice_ok],
+            usage=usage,
+            model="gpt-4",
+            _hidden_params={},
+        )
+        mock_litellm.completion.side_effect = [response_bad, response_ok]
+
+        content, _usage = LLMTracker.call_and_track(
+            messages=[{"role": "user", "content": "hi"}],
+            json_mode=True,
+        )
+
+        assert '"cleaned_content"' in content
+        assert mock_litellm.completion.call_count == 2
+        assert mock_save_usage.call_count == 2
+        mock_sleep.assert_called_once_with(0.5)
+        first_started_at = mock_save_usage.call_args_list[0].kwargs[
+            "started_at"
+        ]
+        second_started_at = mock_save_usage.call_args_list[1].kwargs[
+            "started_at"
+        ]
+        assert first_started_at != second_started_at
+
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.time.sleep"
+    )
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.LLMTracker"
+        "._save_usage_to_db"
+    )
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.litellm"
+    )
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.get_litellm_params"
+    )
+    def test_json_mode_raises_after_retry_exhausted(
+        self,
+        mock_params,
+        mock_litellm,
+        mock_save_usage,
+        mock_sleep,
+    ):
+        mock_params.return_value = {"model": "gpt-4", "api_key": "sk-x"}
+        usage = SimpleNamespace(
+            prompt_tokens=10,
+            completion_tokens=5,
+            total_tokens=15,
+        )
+        choice_bad = SimpleNamespace(message=SimpleNamespace(content=":"))
+        response_bad = SimpleNamespace(
+            choices=[choice_bad],
+            usage=usage,
+            model="gpt-4",
+            _hidden_params={},
+        )
+        mock_litellm.completion.side_effect = [
+            response_bad,
+            response_bad,
+            response_bad,
+        ]
+
+        with pytest.raises(ValueError) as exc_info:
+            LLMTracker.call_and_track(
+                messages=[{"role": "user", "content": "hi"}],
+                json_mode=True,
+            )
+        assert "Invalid JSON response after 3 attempts" in str(exc_info.value)
+        assert mock_litellm.completion.call_count == 3
+        assert mock_save_usage.call_count == 3
+        assert mock_sleep.call_count == 2
 
 
 @pytest.mark.unit

@@ -62,6 +62,8 @@ pytest tests -v
    ```
    - `state` 为可选（任务/用户上下文）。
    - 若 `state` 中包含 `user_id`，且该用户配置了单独 LLM 配置，则按用户配置调用。可传 `model_uuid` 指定使用某条配置；不传则使用最早启用的模型。
+   - `json_mode=True` 且非流式时，默认启用 JSON 修复+校验并重试（`json_attempts=3`，可配置）。
+   - `stream=True` 时不做 JSON repair（流式输出行为不变）。
 3. **配置**
    - 所有配置可通过管理 API 管理（全局默认 + 可选按用户覆盖）。
    - 未指定 model_uuid 时，解析取最早创建的启用配置（按 created_at，全局可设 is_default）：用户作用域 -> 全局作用域；无 DB 配置时报错，不做 settings 回退。
