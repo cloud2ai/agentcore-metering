@@ -176,6 +176,28 @@ class TestRuntimeConfigService:
         assert params["top_p"] == 0
         assert params["max_tokens"] == 0
 
+    def test_build_litellm_params_moonshot_uses_raw_model_id(self):
+        params = rc.build_litellm_params_from_config(
+            "moonshot",
+            {
+                "api_key": "k",
+                "model": "kimi-k2.5",
+            },
+        )
+
+        assert params["model"] == "kimi-k2.5"
+
+    def test_build_litellm_params_moonshot_strips_legacy_prefix(self):
+        params = rc.build_litellm_params_from_config(
+            "moonshot",
+            {
+                "api_key": "k",
+                "model": "moonshot/kimi-k2.5",
+            },
+        )
+
+        assert params["model"] == "kimi-k2.5"
+
     def test_validate_llm_config_success_records_usage(
         self, django_user_model, monkeypatch
     ):

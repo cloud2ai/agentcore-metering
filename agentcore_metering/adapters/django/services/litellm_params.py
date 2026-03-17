@@ -48,6 +48,12 @@ def _model_string(provider: str, config: dict) -> str:
         return f"azure/{deployment}"
     if provider == "gemini":
         return f"gemini/{model}" if "/" not in model else model
+    if provider == "moonshot":
+        # Moonshot endpoint expects raw model ids (e.g. "kimi-k2.5"),
+        # not "moonshot/<model>".
+        if model.startswith("moonshot/"):
+            return model.split("/", 1)[1]
+        return model
     if provider in (
         "anthropic",
         "mistral",
@@ -58,7 +64,6 @@ def _model_string(provider: str, config: dict) -> str:
         "amazon_nova",
         "nvidia_nim",
         "minimax",
-        "moonshot",
         "zai",
         "volcengine",
         "openrouter",
