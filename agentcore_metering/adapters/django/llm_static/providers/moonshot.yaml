@@ -2,6 +2,8 @@ id: moonshot
 label: Moonshot (Kimi)
 default_api_base: "https://api.moonshot.cn/v1"
 default_model: moonshot-v1-8k
+default_temperature: 1
+default_top_p: 0.95
 settings_key: MOONSHOT_CONFIG
 requires_api_base: false
 models:

@@ -63,8 +63,7 @@ class AdminLLMConfigTestView(APIView):
         else:
             detail = message
         return Response(
-            {"ok": False, "detail": detail},
-            status=status.HTTP_200_OK,
+            {"ok": False, "detail": detail}, status=status.HTTP_200_OK
         )
 
 

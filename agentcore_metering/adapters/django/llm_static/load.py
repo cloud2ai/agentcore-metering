@@ -106,7 +106,8 @@ def get_providers_with_models() -> Dict[str, Any]:
 
 def get_provider_defaults() -> Dict[str, Dict[str, Any]]:
     """
-    Load per-provider defaults: default_api_base, default_model, settings_key,
+    Load per-provider defaults: default_api_base, default_model,
+    default_temperature, default_top_p, default_max_tokens, settings_key,
     requires_api_base. Keys are provider ids. Cached. Only includes providers
     that have a YAML file in providers/.
     """
@@ -124,6 +125,9 @@ def get_provider_defaults() -> Dict[str, Dict[str, Any]]:
         out[pid] = {
             "default_api_base": data.get("default_api_base"),
             "default_model": data.get("default_model"),
+            "default_temperature": data.get("default_temperature"),
+            "default_top_p": data.get("default_top_p"),
+            "default_max_tokens": data.get("default_max_tokens"),
             "settings_key": data.get("settings_key"),
             "requires_api_base": bool(data.get("requires_api_base", False)),
         }

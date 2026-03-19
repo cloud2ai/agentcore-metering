@@ -423,6 +423,21 @@ class ProviderParamSchemaEntrySerializer(serializers.Serializer):
         allow_null=True,
         help_text="Official API base URL when not set in config",
     )
+    default_temperature = serializers.FloatField(
+        allow_null=True,
+        required=False,
+        help_text="Provider default temperature",
+    )
+    default_top_p = serializers.FloatField(
+        allow_null=True,
+        required=False,
+        help_text="Provider default top_p",
+    )
+    default_max_tokens = serializers.IntegerField(
+        allow_null=True,
+        required=False,
+        help_text="Provider default max_tokens",
+    )
 
 
 class ProvidersResponseSerializer(serializers.Serializer):

@@ -1,5 +1,5 @@
-from types import SimpleNamespace
 import logging
+from types import SimpleNamespace
 
 import pytest
 from django.test import override_settings
@@ -185,7 +185,7 @@ class TestRuntimeConfigService:
             },
         )
 
-        assert params["model"] == "kimi-k2.5"
+        assert params["model"] == "moonshot/kimi-k2.5"
 
     def test_build_litellm_params_moonshot_strips_legacy_prefix(self):
         params = rc.build_litellm_params_from_config(
@@ -196,7 +196,31 @@ class TestRuntimeConfigService:
             },
         )
 
-        assert params["model"] == "kimi-k2.5"
+        assert params["model"] == "moonshot/kimi-k2.5"
+
+    def test_build_litellm_params_moonshot_uses_yaml_temperature_default(
+        self,
+    ):
+        params = rc.build_litellm_params_from_config(
+            "moonshot",
+            {
+                "api_key": "k",
+                "model": "kimi-k2.5",
+            },
+        )
+
+        assert params["temperature"] == 1
+
+    def test_build_litellm_params_moonshot_uses_yaml_top_p_default(self):
+        params = rc.build_litellm_params_from_config(
+            "moonshot",
+            {
+                "api_key": "k",
+                "model": "kimi-k2.5",
+            },
+        )
+
+        assert params["top_p"] == 0.95
 
     def test_validate_llm_config_success_records_usage(
         self, django_user_model, monkeypatch

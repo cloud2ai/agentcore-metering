@@ -19,6 +19,15 @@ _yaml_defaults = get_provider_defaults()
 OFFICIAL_API_BASES: Dict[str, Optional[str]] = {
     p: d.get("default_api_base") for p, d in _yaml_defaults.items()
 }
+OFFICIAL_DEFAULT_TEMPERATURES: Dict[str, Optional[float]] = {
+    p: d.get("default_temperature") for p, d in _yaml_defaults.items()
+}
+OFFICIAL_DEFAULT_TOP_P: Dict[str, Optional[float]] = {
+    p: d.get("default_top_p") for p, d in _yaml_defaults.items()
+}
+OFFICIAL_DEFAULT_MAX_TOKENS: Dict[str, Optional[int]] = {
+    p: d.get("default_max_tokens") for p, d in _yaml_defaults.items()
+}
 DEFAULT_MODELS: Dict[str, str] = {
     p: d.get("default_model")
     for p, d in _yaml_defaults.items()
@@ -49,11 +58,11 @@ def _model_string(provider: str, config: dict) -> str:
     if provider == "gemini":
         return f"gemini/{model}" if "/" not in model else model
     if provider == "moonshot":
-        # Moonshot endpoint expects raw model ids (e.g. "kimi-k2.5"),
-        # not "moonshot/<model>".
+        # LiteLLM needs the provider prefix to resolve Moonshot correctly.
+        # Accept a legacy prefixed value and normalize it once.
         if model.startswith("moonshot/"):
-            return model.split("/", 1)[1]
-        return model
+            return model
+        return f"moonshot/{model}"
     if provider in (
         "anthropic",
         "mistral",
@@ -90,12 +99,25 @@ def _litellm_kwargs_from_config(provider: str, config: dict) -> Dict[str, Any]:
     if provider == "azure_openai":
         kwargs["api_version"] = config.get("api_version")
     defaults = (
-        ("max_tokens", DEFAULT_MAX_TOKENS),
-        ("temperature", DEFAULT_TEMPERATURE),
-        ("top_p", DEFAULT_TOP_P),
+        (
+            "max_tokens",
+            OFFICIAL_DEFAULT_MAX_TOKENS.get(provider),
+            DEFAULT_MAX_TOKENS,
+        ),
+        (
+            "temperature",
+            OFFICIAL_DEFAULT_TEMPERATURES.get(provider),
+            DEFAULT_TEMPERATURE,
+        ),
+        ("top_p", OFFICIAL_DEFAULT_TOP_P.get(provider), DEFAULT_TOP_P),
     )
-    for key, default in defaults:
+    for key, provider_default, fallback_default in defaults:
         value = config.get(key)
+        default = (
+            provider_default
+            if provider_default is not None
+            else fallback_default
+        )
         kwargs[key] = default if value is None else value
     kwargs["drop_params"] = True
     return {k: v for k, v in kwargs.items() if v is not None}
@@ -203,5 +225,8 @@ def get_provider_params_schema() -> Dict[str, Any]:
             "editable_params": editable,
             "default_model": DEFAULT_MODELS.get(p),
             "default_api_base": OFFICIAL_API_BASES.get(p),
+            "default_temperature": OFFICIAL_DEFAULT_TEMPERATURES.get(p),
+            "default_top_p": OFFICIAL_DEFAULT_TOP_P.get(p),
+            "default_max_tokens": OFFICIAL_DEFAULT_MAX_TOKENS.get(p),
         }
     return {"providers": providers}
