@@ -29,6 +29,29 @@ from agentcore_metering.adapters.django.services.model_catalog import (
 User = get_user_model()
 
 
+def _preserve_masked_secret_fields(
+    existing: dict, incoming: dict, keys: tuple[str, ...] = ("api_key", "key")
+) -> dict:
+    """
+    Keep the stored secret when the client re-sends a masked value.
+
+    The admin UI fetches configs through a read serializer that masks secret
+    fields, then sends the same payload back on updates such as "set as
+    default". If we do not preserve the original value here, the masked
+    placeholder gets persisted and the config stops authenticating.
+    """
+    merged = dict(existing or {})
+    for key, value in (incoming or {}).items():
+        if (
+            key in keys
+            and isinstance(value, str)
+            and "***" in value
+        ):
+            continue
+        merged[key] = value
+    return merged
+
+
 class AdminLLMConfigAllListView(APIView):
     """
     GET: List all LLM configs (global + user) in one list.
@@ -228,7 +251,9 @@ class AdminLLMConfigDetailView(APIView):
         if "provider" in data:
             obj.provider = (data["provider"] or "openai").strip().lower()
         if "config" in data:
-            obj.config = data["config"]
+            obj.config = _preserve_masked_secret_fields(
+                obj.config or {}, data["config"] or {}
+            )
         if "is_active" in data:
             obj.is_active = data["is_active"]
         if "is_default" in data and obj.scope == LLMConfig.Scope.GLOBAL:
@@ -346,13 +371,22 @@ class AdminLLMConfigUserDetailView(APIView):
                 {"detail": "User not found."},
                 status=status.HTTP_404_NOT_FOUND,
             )
-        obj = (
-            LLMConfig.objects.filter(
-                scope=LLMConfig.Scope.USER, user_id=user.pk
+        qs = LLMConfig.objects.filter(
+            scope=LLMConfig.Scope.USER,
+            user_id=user.pk,
+            model_type=LLMConfig.MODEL_TYPE_LLM,
+        ).select_related("user")
+        if qs.count() > 1:
+            return Response(
+                {
+                    "detail": (
+                        "Multiple user LLM configs exist for this user. "
+                        "Clean up duplicates before reading."
+                    )
+                },
+                status=status.HTTP_409_CONFLICT,
             )
-            .select_related("user")
-            .first()
-        )
+        obj = qs.first()
         if obj is None:
             return Response(
                 {"detail": "No LLM config for this user. Use PUT to create."},
@@ -385,14 +419,41 @@ class AdminLLMConfigUserDetailView(APIView):
         if not ser.is_valid():
             return Response(ser.errors, status=status.HTTP_400_BAD_REQUEST)
         data = ser.validated_data
-        obj, _ = LLMConfig.objects.update_or_create(
+        qs = LLMConfig.objects.filter(
             scope=LLMConfig.Scope.USER,
             user=user,
-            defaults={
-                "provider": (data.get("provider") or "openai").strip().lower(),
-                "config": data.get("config") or {},
-            },
+            model_type=LLMConfig.MODEL_TYPE_LLM,
         )
+        if qs.count() > 1:
+            return Response(
+                {
+                    "detail": (
+                        "Multiple user LLM configs exist for this user. "
+                        "Clean up duplicates before updating."
+                    )
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        obj = qs.first()
+        if obj is None:
+            obj = LLMConfig.objects.create(
+                scope=LLMConfig.Scope.USER,
+                user=user,
+                model_type=LLMConfig.MODEL_TYPE_LLM,
+                provider=(data.get("provider") or "openai").strip().lower(),
+                config=_preserve_masked_secret_fields(
+                    {}, data.get("config") or {}
+                ),
+                is_active=data.get("is_active", True),
+            )
+        else:
+            obj.provider = (data.get("provider") or "openai").strip().lower()
+            obj.config = _preserve_masked_secret_fields(
+                obj.config or {}, data.get("config") or {}
+            )
+            if "is_active" in data:
+                obj.is_active = data["is_active"]
+            obj.save()
         ctx = {"default_config_uuid": get_default_llm_config_uuid()}
         return Response(LLMConfigSerializer(obj, context=ctx).data)
 

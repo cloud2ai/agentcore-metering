@@ -93,6 +93,49 @@ class TestAdminLLMConfigGlobal:
         )
 
 
+    def test_put_global_preserves_masked_api_key_when_setting_default(
+        self, admin_client
+    ):
+        create_resp = admin_client.post(
+            "/api/v1/admin/llm-config/",
+            {
+                "provider": "openai",
+                "config": {
+                    "api_key": "sk-test-secret-1234",
+                    "model": "gpt-4o-mini",
+                },
+            },
+            format="json",
+        )
+        assert create_resp.status_code == 201
+        config_uuid = create_resp.json()["uuid"]
+
+        detail_resp = admin_client.get(
+            f"/api/v1/admin/llm-config/{config_uuid}/"
+        )
+        assert detail_resp.status_code == 200
+        detail_body = detail_resp.json()
+        assert detail_body["config"]["api_key"] != "sk-test-secret-1234"
+
+        update_resp = admin_client.put(
+            f"/api/v1/admin/llm-config/{config_uuid}/",
+            {
+                "provider": detail_body["provider"],
+                "config": detail_body["config"],
+                "is_active": detail_body["is_active"],
+                "is_default": True,
+            },
+            format="json",
+        )
+        assert update_resp.status_code == 200
+        assert update_resp.json()["is_default"] is True
+
+        cfg = LLMConfig.objects.get(uuid=config_uuid)
+        assert cfg.is_default is True
+        assert cfg.config["api_key"] == "sk-test-secret-1234"
+        assert cfg.config["model"] == "gpt-4o-mini"
+
+
 @pytest.mark.api
 @pytest.mark.django_db
 class TestAdminLLMConfigUser:
@@ -122,6 +165,41 @@ class TestAdminLLMConfigUser:
         assert body["scope"] == "user"
         assert body["user_id"] == normal_user.pk
         assert body["provider"] == "openai"
+
+    def test_duplicate_user_configs_return_conflict(
+        self, admin_client, normal_user
+    ):
+        LLMConfig.objects.create(
+            scope=LLMConfig.Scope.USER,
+            user=normal_user,
+            model_type=LLMConfig.MODEL_TYPE_LLM,
+            provider="openai",
+            config={"api_key": "sk-one", "model": "gpt-4"},
+            is_active=True,
+        )
+        LLMConfig.objects.create(
+            scope=LLMConfig.Scope.USER,
+            user=normal_user,
+            model_type=LLMConfig.MODEL_TYPE_LLM,
+            provider="openai",
+            config={"api_key": "sk-two", "model": "gpt-4"},
+            is_active=True,
+        )
+
+        get_response = admin_client.get(
+            f"/api/v1/admin/llm-config/users/{normal_user.pk}/"
+        )
+        assert get_response.status_code == 409
+
+        put_response = admin_client.put(
+            f"/api/v1/admin/llm-config/users/{normal_user.pk}/",
+            {
+                "provider": "openai",
+                "config": {"api_key": "sk-new", "model": "gpt-4"},
+            },
+            format="json",
+        )
+        assert put_response.status_code == 409
 
     def test_get_user_config_after_put(self, admin_client, normal_user):
         admin_client.put(
