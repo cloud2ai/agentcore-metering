@@ -529,6 +529,13 @@ class LLMTracker:
             """
             if value is None:
                 return ""
+            if isinstance(value, dict):
+                text = (
+                    value.get("text")
+                    or value.get("content")
+                    or value.get("value")
+                )
+                return text if isinstance(text, str) else ""
             if isinstance(value, str):
                 return value
             if isinstance(value, list):
@@ -564,6 +571,14 @@ class LLMTracker:
             if isinstance(text, str):
                 return text
             return ""
+
+        def _read_chunk_field(obj: Any, key: str) -> Any:
+            """Read field from object-like or dict-like chunk parts."""
+            if obj is None:
+                return None
+            if isinstance(obj, dict):
+                return obj.get(key)
+            return getattr(obj, key, None)
 
         def _build_usage_and_save(
             _usage: Dict[str, Any],
@@ -660,7 +675,12 @@ class LLMTracker:
                 choice = choices[0] if choices else None
                 if not choice:
                     continue
-                if not getattr(choice, "delta", None):
+                delta = _read_chunk_field(choice, "delta")
+                if delta is None:
+                    # Some OpenAI-compatible gateways stream under
+                    # choices[].message instead of choices[].delta.
+                    delta = _read_chunk_field(choice, "message")
+                if delta is None:
                     if not logged_unknown_shape:
                         logger.warning(
                             f"LLM stream chunk missing choice.delta; "
@@ -669,10 +689,9 @@ class LLMTracker:
                         )
                         logged_unknown_shape = True
                     continue
-                delta = choice.delta
                 reasoning_raw = (
-                    getattr(delta, "reasoning_content", None)
-                    or getattr(delta, "reasoning", None)
+                    _read_chunk_field(delta, "reasoning_content")
+                    or _read_chunk_field(delta, "reasoning")
                 )
                 if reasoning_raw is not None:
                     text = _extract_text(reasoning_raw)
@@ -686,7 +705,7 @@ class LLMTracker:
                             yield ("reasoning", text)
                         except GeneratorExit:
                             _handle_stream_stop()
-                content = getattr(delta, "content", None)
+                content = _read_chunk_field(delta, "content")
                 if content is not None:
                     text = _extract_text(content)
                     text = str(text).strip() if text else ""
@@ -699,6 +718,11 @@ class LLMTracker:
                             yield ("content", text)
                         except GeneratorExit:
                             _handle_stream_stop()
+                    elif isinstance(content, str):
+                        # Some providers emit empty/whitespace string chunks.
+                        # This is valid and should not be treated as shape
+                        # mismatch.
+                        continue
                     elif not logged_unknown_shape:
                         logger.warning(
                             f"LLM stream delta.content had unsupported type; "

@@ -36,6 +36,7 @@ from agentcore_metering.adapters.django.utils import (
 )
 from agentcore_metering.constants import (
     DEFAULT_COST_CURRENCY,
+    LITELLM_REQUEST_TIMEOUT,
     TEST_MAX_TOKENS,
 )
 
@@ -242,6 +243,7 @@ def validate_llm_config(
     try:
         params = build_litellm_params_from_config(provider, config)
         params["max_tokens"] = TEST_MAX_TOKENS
+        params["timeout"] = LITELLM_REQUEST_TIMEOUT
         params["messages"] = [{"role": "user", "content": "Hi"}]
         user_id = getattr(user, "pk", None)
         logger.info(

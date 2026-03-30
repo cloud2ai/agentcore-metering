@@ -64,7 +64,7 @@ class TestRuntimeConfigService:
             params = rc.get_litellm_params(user_id=user.id)
 
         assert params["api_key"] == "user-key"
-        assert params["model"] == "gpt-4o-mini"
+        assert params["model"] == "openai/gpt-4o-mini"
 
     def test_get_litellm_params_uses_global_when_user_scope_missing(self):
         LLMConfig.objects.create(
@@ -79,7 +79,7 @@ class TestRuntimeConfigService:
         params = rc.get_litellm_params(user_id=99999)
 
         assert params["api_key"] == "global-key"
-        assert params["model"] == "gpt-4o-mini"
+        assert params["model"] == "openai/gpt-4o-mini"
 
     def test_get_litellm_params_without_user_id_ignores_user_configs(
         self, django_user_model
@@ -109,7 +109,7 @@ class TestRuntimeConfigService:
         params = rc.get_litellm_params()
 
         assert params["api_key"] == "global-key"
-        assert params["model"] == "gpt-4o-mini"
+        assert params["model"] == "openai/gpt-4o-mini"
 
     def test_get_litellm_params_with_model_uuid_uses_that_config(
         self, django_user_model
@@ -221,6 +221,28 @@ class TestRuntimeConfigService:
         )
 
         assert params["top_p"] == 0.95
+
+    def test_build_litellm_params_openai_prefixes_plain_model(self):
+        params = rc.build_litellm_params_from_config(
+            "openai",
+            {
+                "api_key": "k",
+                "model": "133357084870905856",
+            },
+        )
+
+        assert params["model"] == "openai/133357084870905856"
+
+    def test_build_litellm_params_openai_keeps_prefixed_model(self):
+        params = rc.build_litellm_params_from_config(
+            "openai",
+            {
+                "api_key": "k",
+                "model": "openai/gpt-4o-mini",
+            },
+        )
+
+        assert params["model"] == "openai/gpt-4o-mini"
 
     def test_validate_llm_config_success_records_usage(
         self, django_user_model, monkeypatch

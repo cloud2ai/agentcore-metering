@@ -87,6 +87,10 @@ def _litellm_kwargs_from_config(provider: str, config: dict) -> Dict[str, Any]:
     provider = (provider or "openai").strip().lower()
     config = config or {}
     model = _model_string(provider, config)
+    # For OpenAI-compatible gateways using custom model ids
+    # (e.g. numeric ids), LiteLLM requires explicit provider prefix.
+    if provider == "openai" and model and "/" not in model:
+        model = f"openai/{model}"
     api_base = (
         (config.get("api_base") or "").strip()
         or OFFICIAL_API_BASES.get(provider)
