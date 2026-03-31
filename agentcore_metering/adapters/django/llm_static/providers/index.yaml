@@ -1,6 +1,7 @@
 # Order of providers for UI and resolution
 provider_ids:
   - openai
+  - openai_compatible
   - azure_openai
   - gemini
   - anthropic

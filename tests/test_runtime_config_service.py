@@ -244,6 +244,32 @@ class TestRuntimeConfigService:
 
         assert params["model"] == "openai/gpt-4o-mini"
 
+    def test_build_litellm_params_openai_compatible_keeps_raw_model(self):
+        params = rc.build_litellm_params_from_config(
+            "openai_compatible",
+            {
+                "api_key": "k",
+                "api_base": "https://example.com/v1",
+                "model": "133356111406325760",
+            },
+        )
+
+        assert params["model"] == "133356111406325760"
+        assert params["api_base"] == "https://example.com/v1"
+        assert params["custom_llm_provider"] == "openai"
+
+    def test_build_litellm_params_openai_compatible_requires_api_base(self):
+        with pytest.raises(ValueError) as exc_info:
+            rc.build_litellm_params_from_config(
+                "openai_compatible",
+                {
+                    "api_key": "k",
+                    "model": "133356111406325760",
+                },
+            )
+
+        assert "api_base" in str(exc_info.value)
+
     def test_validate_llm_config_success_records_usage(
         self, django_user_model, monkeypatch
     ):
