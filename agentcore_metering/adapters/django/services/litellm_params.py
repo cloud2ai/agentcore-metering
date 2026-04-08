@@ -52,6 +52,8 @@ def _model_string(provider: str, config: dict) -> str:
     model = (config.get("model") or "").strip() or DEFAULT_MODELS.get(
         provider, "gpt-4o-mini"
     )
+    if provider == "openai_compatible":
+        return model
     if provider == "azure_openai":
         deployment = config.get("deployment") or model
         return f"azure/{deployment}"
@@ -100,6 +102,8 @@ def _litellm_kwargs_from_config(provider: str, config: dict) -> Dict[str, Any]:
         "api_key": config.get("api_key") or None,
         "api_base": api_base,
     }
+    if provider == "openai_compatible":
+        kwargs["custom_llm_provider"] = "openai"
     if provider == "azure_openai":
         kwargs["api_version"] = config.get("api_version")
     defaults = (
@@ -132,6 +136,11 @@ def _validate_config(provider: str, config: dict) -> None:
     provider = (provider or "openai").strip().lower()
     if provider in PROVIDERS_REQUIRING_API_BASE:
         if not config.get("api_key") or not config.get("api_base"):
+            if provider == "openai_compatible":
+                raise ValueError(
+                    "OpenAI Compatible configuration is incomplete. "
+                    "Set api_key and api_base."
+                )
             raise ValueError(
                 "Azure OpenAI configuration is incomplete. "
                 "Set api_key and api_base."
