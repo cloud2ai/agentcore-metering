@@ -80,6 +80,12 @@ pytest tests -v
 - **All providers support `api_base` (URL)**:
   - official endpoint when omitted
   - proxy/forwarding URL when needed
+- If you are using an **official model endpoint**, choose the native provider
+  for that vendor, for example `minimax`.
+- If you are using a **third-party forwarding platform** through an
+  **OpenAI Compatible** endpoint, choose `openai_compatible`.
+- Do not rely on model strings to infer provider automatically; choose the
+  provider based on the actual integration path.
 
 | Provider        | Default model / notes |
 |-----------------|------------------------|
@@ -95,6 +101,7 @@ pytest tests -v
 | `amazon_nova`   | nova-micro-v1 |
 | `nvidia_nim`    | meta/llama3-8b (Nemotron / NIM) |
 | `minimax`       | MiniMax-M2.1 |
+| `openai_compatible` | Depends on the gateway vendor (OpenAI Compatible endpoint) |
 | `moonshot`      | moonshot-v1-8k (Kimi) |
 | `zai`           | glm-4.5-flash (Z.AI GLM) |
 | `volcengine`    | doubao-pro-32k (ByteDance Doubao) |

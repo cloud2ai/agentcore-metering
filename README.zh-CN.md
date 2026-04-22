@@ -77,6 +77,9 @@ pytest tests -v
 - **所有提供商均支持 `api_base`（URL）**：
   - 未设置时使用官方端点
   - 需要时可设为代理/转发 URL
+- 如果使用**官方模型接口**，建议选择原生 provider，例如 `minimax`。
+- 如果使用**第三方转发平台**并通过 **OpenAI Compatible** 接口访问，建议选择 `openai_compatible`。
+- 不建议依赖模型字符串自动推断 provider，请按实际接入方式手动选择。
 
 | 提供商        | 默认模型 / 说明 |
 |-----------------|------------------|
@@ -92,6 +95,7 @@ pytest tests -v
 | `amazon_nova`   | nova-micro-v1 |
 | `nvidia_nim`    | meta/llama3-8b（NVIDIA NIM / Nemotron） |
 | `minimax`       | MiniMax-M2.1 |
+| `openai_compatible` | 取决于第三方网关（OpenAI Compatible 接口） |
 | `moonshot`      | moonshot-v1-8k（Kimi） |
 | `zai`           | glm-4.5-flash（智谱 GLM） |
 | `volcengine`    | doubao-pro-32k（字节豆包） |
