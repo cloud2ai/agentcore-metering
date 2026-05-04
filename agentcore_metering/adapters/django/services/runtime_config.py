@@ -10,6 +10,7 @@ Supported: OpenAI, Azure, Gemini, Anthropic, Mistral, Qwen, DeepSeek, xAI,
 Meta Llama, Amazon Nova, NVIDIA NIM, MiniMax, Moonshot, Z.AI, Volcengine,
 OpenRouter.
 """
+
 import logging
 from decimal import Decimal
 from typing import Any, Dict, Generator, Optional, Tuple
@@ -128,9 +129,9 @@ def _user_friendly_validation_error(exc: Exception) -> str:
     return "unknown"
 
 
-def _extract_usage_from_response(response: Any, params: dict) -> Tuple[
-    str, int, int, int, int, int, Optional[Decimal]
-]:
+def _extract_usage_from_response(
+    response: Any, params: dict
+) -> Tuple[str, int, int, int, int, int, Optional[Decimal]]:
     """
     Extract actual_model, token counts, and cost from LiteLLM completion
     response. Returns (actual_model, prompt_tokens, completion_tokens,
@@ -147,37 +148,34 @@ def _extract_usage_from_response(response: Any, params: dict) -> Tuple[
         completion_tokens = _safe_int(
             _read_field(usage_obj, "completion_tokens", 0)
         )
-        total_tokens = (
-            _safe_int(_read_field(usage_obj, "total_tokens", 0))
-            or (prompt_tokens + completion_tokens)
-        )
+        total_tokens = _safe_int(
+            _read_field(usage_obj, "total_tokens", 0)
+        ) or (prompt_tokens + completion_tokens)
         cached_tokens = _safe_int(_read_field(usage_obj, "cached_tokens", 0))
         reasoning_tokens = _safe_int(
             _read_field(usage_obj, "reasoning_tokens", 0)
         )
         if cached_tokens == 0:
-            prompt_details = (
-                _read_field(usage_obj, "prompt_tokens_details", None)
-                or _read_field(usage_obj, "input_token_details", None)
-            )
+            prompt_details = _read_field(
+                usage_obj, "prompt_tokens_details", None
+            ) or _read_field(usage_obj, "input_token_details", None)
             cached_tokens = _read_nested_int(
                 prompt_details,
                 ("cached_tokens", "cache_read_tokens", "cache_read"),
                 0,
             )
         if reasoning_tokens == 0:
-            completion_details = (
-                _read_field(usage_obj, "completion_tokens_details", None)
-                or _read_field(usage_obj, "output_token_details", None)
-            )
+            completion_details = _read_field(
+                usage_obj, "completion_tokens_details", None
+            ) or _read_field(usage_obj, "output_token_details", None)
             reasoning_tokens = _read_nested_int(
                 completion_details,
                 ("reasoning_tokens", "reasoning"),
                 0,
             )
 
-    actual_model = (
-        getattr(response, "model", None) or params.get("model", "unknown")
+    actual_model = getattr(response, "model", None) or params.get(
+        "model", "unknown"
     )
     cost = None
     try:
@@ -189,8 +187,13 @@ def _extract_usage_from_response(response: Any, params: dict) -> Tuple[
     except Exception as e:
         logger.debug(f"completion_cost failed: {e}")
     return (
-        actual_model, prompt_tokens, completion_tokens, total_tokens,
-        cached_tokens, reasoning_tokens, cost,
+        actual_model,
+        prompt_tokens,
+        completion_tokens,
+        total_tokens,
+        cached_tokens,
+        reasoning_tokens,
+        cost,
     )
 
 
@@ -243,7 +246,7 @@ def validate_llm_config(
     try:
         params = build_litellm_params_from_config(provider, config)
         params["max_tokens"] = TEST_MAX_TOKENS
-        params["timeout"] = LITELLM_REQUEST_TIMEOUT
+        params.setdefault("timeout", LITELLM_REQUEST_TIMEOUT)
         params["messages"] = [{"role": "user", "content": "Hi"}]
         user_id = getattr(user, "pk", None)
         logger.info(
@@ -266,8 +269,13 @@ def validate_llm_config(
             return False, "LLM returned no response"
 
         (
-            actual_model, prompt_tokens, completion_tokens, total_tokens,
-            cached_tokens, reasoning_tokens, cost,
+            actual_model,
+            prompt_tokens,
+            completion_tokens,
+            total_tokens,
+            cached_tokens,
+            reasoning_tokens,
+            cost,
         ) = _extract_usage_from_response(response, params)
         logger.info(
             "LLM validate usage "
@@ -511,9 +519,10 @@ def get_litellm_params(
     settings fallback; config must exist in DB.
 
     Returns:
-        Dict with "model", "max_tokens", "temperature", "top_p" (defaults
-        applied when not in config), and optionally "api_key", "api_base".
-        Pass to litellm.completion(..., **params).
+        Dict with "model", "max_tokens", "temperature", "top_p",
+        "request_timeout_seconds" (defaults applied when not in config),
+        and optionally "api_key", "api_base", "timeout". Pass to
+        litellm.completion(..., **params).
 
     Raises:
         ValueError: If no config in DB or required config (e.g. api_key)

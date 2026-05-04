@@ -146,6 +146,33 @@ class TestRuntimeConfigService:
         )
         assert params_user_uuid["api_key"] == "user-key"
 
+    def test_get_litellm_params_uses_request_timeout_seconds(
+        self, django_user_model
+    ):
+        user = django_user_model.objects.create_user(
+            username="u_timeout",
+            email="u_timeout@example.com",
+            password="pass",
+        )
+        cfg = LLMConfig.objects.create(
+            scope=LLMConfig.Scope.USER,
+            user=user,
+            model_type=LLMConfig.MODEL_TYPE_LLM,
+            provider="openai",
+            config={
+                "api_key": "user-key",
+                "model": "gpt-4o-mini",
+                "request_timeout_seconds": 123,
+            },
+            is_active=True,
+        )
+
+        params = rc.get_litellm_params(
+            user_id=user.id, model_uuid=str(cfg.uuid)
+        )
+
+        assert params["timeout"] == 123
+
     def test_get_litellm_params_invalid_model_uuid_raises_no_fallback(self):
         with pytest.raises(ValueError) as exc_info:
             rc.get_litellm_params(
@@ -175,6 +202,39 @@ class TestRuntimeConfigService:
         assert params["temperature"] == 0
         assert params["top_p"] == 0
         assert params["max_tokens"] == 0
+
+    def test_build_litellm_params_supports_request_timeout_seconds(self):
+        params = rc.build_litellm_params_from_config(
+            "openai",
+            {
+                "api_key": "k",
+                "model": "gpt-4o-mini",
+                "request_timeout_seconds": 90,
+            },
+        )
+
+        assert params["timeout"] == 90
+
+    def test_build_litellm_params_uses_default_timeout_when_missing(self):
+        params = rc.build_litellm_params_from_config(
+            "openai",
+            {
+                "api_key": "k",
+                "model": "gpt-4o-mini",
+            },
+        )
+
+        assert params["timeout"] == 60
+
+    def test_provider_schema_exposes_request_timeout_seconds(self):
+        schema = rc.get_provider_params_schema()
+
+        for provider in ("openai", "azure_openai"):
+            provider_schema = schema["providers"][provider]
+            assert "request_timeout_seconds" in provider_schema["optional"]
+            assert (
+                "request_timeout_seconds" in provider_schema["editable_params"]
+            )
 
     def test_build_litellm_params_moonshot_uses_raw_model_id(self):
         params = rc.build_litellm_params_from_config(

@@ -2,9 +2,10 @@
 LLM call tracker using LiteLLM: completion + usage and cost tracking.
 
 Uses litellm.completion(); token/cost extraction is delegated to llm_usage.
-Applies LiteLLM global retry and timeout at module load. Handles
-AuthenticationError, RateLimitError, and APIError with distinct logging.
+Applies LiteLLM global retry at module load. Handles AuthenticationError,
+RateLimitError, and APIError with distinct logging.
 """
+
 import logging
 import json
 import time
@@ -30,7 +31,6 @@ from agentcore_metering.adapters.django.trackers.llm_usage import (
 from agentcore_metering.constants import (
     DEFAULT_COST_CURRENCY,
     LITELLM_NUM_RETRIES,
-    LITELLM_REQUEST_TIMEOUT,
 )
 
 logger = logging.getLogger(__name__)
@@ -39,7 +39,6 @@ TASK_LLM_CALL = "llm_call"
 JSON_RETRY_BASE_DELAY_SECONDS = 0.5
 
 litellm.num_retries = LITELLM_NUM_RETRIES
-litellm.request_timeout = LITELLM_REQUEST_TIMEOUT
 
 
 def _default_usage_dict(model: str) -> Dict[str, Any]:
@@ -67,15 +66,17 @@ def _record_failed_llm_call(
 ) -> None:
     """Record a failed LLM call into state and DB. Does not raise."""
     if state is not None:
-        state.setdefault("llm_calls", []).append({
-            "node": node_name,
-            "model": "unknown",
-            "prompt_tokens": 0,
-            "completion_tokens": 0,
-            "total_tokens": 0,
-            "success": False,
-            "error": error_msg,
-        })
+        state.setdefault("llm_calls", []).append(
+            {
+                "node": node_name,
+                "model": "unknown",
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0,
+                "success": False,
+                "error": error_msg,
+            }
+        )
     LLMTracker._save_usage_to_db(
         state=effective_state,
         model="unknown",
@@ -200,12 +201,10 @@ class LLMTracker:
         }
         logger.info(
             f"Starting {TASK_LLM_CALL} node_name={node_name} "
-            f"model={model} message_count={len(messages)}"
+            f"model={model} message_count={len(messages)} "
+            f"timeout={params.get('timeout')}"
         )
-        do_json_repair = (
-            json_mode if json_repair is None
-            else json_repair
-        )
+        do_json_repair = json_mode if json_repair is None else json_repair
         max_json_attempts = max(1, int(json_attempts))
 
         if stream:
@@ -249,7 +248,9 @@ class LLMTracker:
                 last_error = e
                 if attempt_idx >= total_attempts - 1:
                     break
-                delay_seconds = JSON_RETRY_BASE_DELAY_SECONDS * (2 ** attempt_idx)
+                delay_seconds = JSON_RETRY_BASE_DELAY_SECONDS * (
+                    2**attempt_idx
+                )
                 logger.warning(
                     f"JSON parse validation failed "
                     f"(attempt {attempt_idx + 1}/{total_attempts}) "
@@ -306,19 +307,21 @@ class LLMTracker:
             response_model_raw = getattr(response, "model", None)
 
             if state is not None:
-                state.setdefault("llm_calls", []).append({
-                    "node": effective_state.get("node_name", "unknown"),
-                    "model": usage["model"],
-                    "prompt_tokens": usage["prompt_tokens"],
-                    "completion_tokens": usage["completion_tokens"],
-                    "total_tokens": usage["total_tokens"],
-                    "cached_tokens": usage["cached_tokens"],
-                    "reasoning_tokens": usage["reasoning_tokens"],
-                    "cost": usage.get("cost"),
-                    "cost_currency": usage.get("cost_currency"),
-                    "success": True,
-                    "error": None,
-                })
+                state.setdefault("llm_calls", []).append(
+                    {
+                        "node": effective_state.get("node_name", "unknown"),
+                        "model": usage["model"],
+                        "prompt_tokens": usage["prompt_tokens"],
+                        "completion_tokens": usage["completion_tokens"],
+                        "total_tokens": usage["total_tokens"],
+                        "cached_tokens": usage["cached_tokens"],
+                        "reasoning_tokens": usage["reasoning_tokens"],
+                        "cost": usage.get("cost"),
+                        "cost_currency": usage.get("cost_currency"),
+                        "success": True,
+                        "error": None,
+                    }
+                )
 
             LLMTracker._save_usage_to_db(
                 state=effective_state,
@@ -604,19 +607,21 @@ class LLMTracker:
                 except (TypeError, ValueError):
                     cost = None
             if state is not None and success:
-                state.setdefault("llm_calls", []).append({
-                    "node": effective_state.get("node_name", "unknown"),
-                    "model": usage_in["model"],
-                    "prompt_tokens": usage_in["prompt_tokens"],
-                    "completion_tokens": usage_in["completion_tokens"],
-                    "total_tokens": usage_in["total_tokens"],
-                    "cached_tokens": usage_in["cached_tokens"],
-                    "reasoning_tokens": usage_in["reasoning_tokens"],
-                    "cost": usage_in.get("cost"),
-                    "cost_currency": usage_in.get("cost_currency"),
-                    "success": True,
-                    "error": None,
-                })
+                state.setdefault("llm_calls", []).append(
+                    {
+                        "node": effective_state.get("node_name", "unknown"),
+                        "model": usage_in["model"],
+                        "prompt_tokens": usage_in["prompt_tokens"],
+                        "completion_tokens": usage_in["completion_tokens"],
+                        "total_tokens": usage_in["total_tokens"],
+                        "cached_tokens": usage_in["cached_tokens"],
+                        "reasoning_tokens": usage_in["reasoning_tokens"],
+                        "cost": usage_in.get("cost"),
+                        "cost_currency": usage_in.get("cost_currency"),
+                        "success": True,
+                        "error": None,
+                    }
+                )
             response_model_raw = (
                 getattr(_last_chunk, "model", None) if _last_chunk else None
             )
@@ -685,14 +690,14 @@ class LLMTracker:
                         logger.warning(
                             f"LLM stream chunk missing choice.delta; "
                             f"expected OpenAI-compatible streaming format. "
-                            f"model={model} choice_type={type(choice).__name__}"
+                            f"model={model} "
+                            f"choice_type={type(choice).__name__}"
                         )
                         logged_unknown_shape = True
                     continue
-                reasoning_raw = (
-                    _read_chunk_field(delta, "reasoning_content")
-                    or _read_chunk_field(delta, "reasoning")
-                )
+                reasoning_raw = _read_chunk_field(
+                    delta, "reasoning_content"
+                ) or _read_chunk_field(delta, "reasoning")
                 if reasoning_raw is not None:
                     text = _extract_text(reasoning_raw)
                     text = str(text).strip() if text else ""

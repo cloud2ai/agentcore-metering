@@ -4,6 +4,7 @@ Build LiteLLM completion params from provider + config.
 Provider defaults come from YAML (llm_static/providers/*.yaml).
 Used by runtime_config for validation, test-call, and get_litellm_params.
 """
+
 from typing import Any, Dict, Optional
 
 from agentcore_metering.adapters.django.llm_static.load import (
@@ -12,6 +13,7 @@ from agentcore_metering.adapters.django.llm_static.load import (
 from agentcore_metering.constants import (
     DEFAULT_MAX_TOKENS,
     DEFAULT_TEMPERATURE,
+    LITELLM_REQUEST_TIMEOUT,
     DEFAULT_TOP_P,
 )
 
@@ -94,9 +96,8 @@ def _litellm_kwargs_from_config(provider: str, config: dict) -> Dict[str, Any]:
     if provider == "openai" and model and "/" not in model:
         model = f"openai/{model}"
     api_base = (
-        (config.get("api_base") or "").strip()
-        or OFFICIAL_API_BASES.get(provider)
-    )
+        config.get("api_base") or ""
+    ).strip() or OFFICIAL_API_BASES.get(provider)
     kwargs = {
         "model": model,
         "api_key": config.get("api_key") or None,
@@ -127,6 +128,21 @@ def _litellm_kwargs_from_config(provider: str, config: dict) -> Dict[str, Any]:
             else fallback_default
         )
         kwargs[key] = default if value is None else value
+    timeout_value = config.get("request_timeout_seconds")
+    if timeout_value is None or timeout_value == "":
+        kwargs["timeout"] = LITELLM_REQUEST_TIMEOUT
+    else:
+        try:
+            timeout_seconds = int(timeout_value)
+        except (TypeError, ValueError):
+            raise ValueError(
+                "request_timeout_seconds must be a positive integer"
+            )
+        if timeout_seconds <= 0:
+            raise ValueError(
+                "request_timeout_seconds must be a positive integer"
+            )
+        kwargs["timeout"] = timeout_seconds
     kwargs["drop_params"] = True
     return {k: v for k, v in kwargs.items() if v is not None}
 
@@ -164,9 +180,7 @@ def _validate_config(provider: str, config: dict) -> None:
             )
         return
     if not config.get("api_key"):
-        raise ValueError(
-            f"Provider '{provider}' requires api_key in config."
-        )
+        raise ValueError(f"Provider '{provider}' requires api_key in config.")
 
 
 def build_litellm_params_from_config(
@@ -197,6 +211,7 @@ def get_provider_params_schema() -> Dict[str, Any]:
         "max_tokens",
         "temperature",
         "top_p",
+        "request_timeout_seconds",
     ]
     editable_common = [
         "api_base",
@@ -205,6 +220,7 @@ def get_provider_params_schema() -> Dict[str, Any]:
         "max_tokens",
         "temperature",
         "top_p",
+        "request_timeout_seconds",
     ]
     providers = {}
     for p in DEFAULT_MODELS:
@@ -218,6 +234,7 @@ def get_provider_params_schema() -> Dict[str, Any]:
                 "max_tokens",
                 "temperature",
                 "top_p",
+                "request_timeout_seconds",
             ]
             editable = [
                 "api_base",
@@ -228,6 +245,7 @@ def get_provider_params_schema() -> Dict[str, Any]:
                 "max_tokens",
                 "temperature",
                 "top_p",
+                "request_timeout_seconds",
             ]
         else:
             optional = optional_common.copy()

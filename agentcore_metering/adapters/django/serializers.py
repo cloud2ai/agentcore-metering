@@ -4,6 +4,7 @@ Serializers for agentcore_metering admin API.
 Includes read/write serializers for LLM config and response serializers
 for OpenAPI/Swagger documentation (token stats, usage list, errors).
 """
+
 from rest_framework import serializers
 
 from agentcore_metering.adapters.django.models import LLMConfig
@@ -73,10 +74,9 @@ class LLMConfigSerializer(serializers.ModelSerializer):
             data["user_id"] = instance.user_id
             data["username"] = getattr(instance.user, "username", None)
         default_uuid = self.context.get("default_config_uuid")
-        data["is_default"] = (
-            default_uuid is not None
-            and str(instance.uuid) == str(default_uuid)
-        )
+        data["is_default"] = default_uuid is not None and str(
+            instance.uuid
+        ) == str(default_uuid)
         return data
 
 
@@ -99,8 +99,9 @@ class LLMConfigWriteSerializer(serializers.Serializer):
         help_text=(
             "Provider-specific config: api_key (required for most), model, "
             "api_base, deployment (Azure), max_tokens, temperature, top_p, "
-            "api_version (Azure). Use GET .../llm-config/providers/ for "
-            "per-provider required/optional keys."
+            "request_timeout_seconds, api_version (Azure). Use GET "
+            ".../llm-config/providers/ for per-provider required/optional "
+            "keys."
         ),
     )
     is_active = serializers.BooleanField(
