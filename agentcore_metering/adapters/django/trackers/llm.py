@@ -289,6 +289,16 @@ class LLMTracker:
             msg = choice.message
             content = getattr(msg, "content", None) or ""
             if not (content and str(content).strip()):
+                # Log diagnostic info to identify why content is empty.
+                finish_reason = getattr(choice, "finish_reason", None)
+                reasoning = getattr(msg, "reasoning_content", None)
+                logger.warning(
+                    f"[{node_name}] LLM returned empty content — "
+                    f"finish_reason={finish_reason!r} "
+                    f"has_reasoning_content={bool(reasoning)} "
+                    f"reasoning_len={len(reasoning) if reasoning else 0} "
+                    f"model={model}"
+                )
                 raise ValueError("LLM returned empty response")
 
             usage = usage_from_response(response, model)

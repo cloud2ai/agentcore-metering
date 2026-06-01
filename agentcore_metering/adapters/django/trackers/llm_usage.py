@@ -101,6 +101,11 @@ def usage_dict_from_usage_obj(
             or (prompt_tokens + completion_tokens)
         )
         cached_tokens = _safe_int(_read_field(usage_obj, "cached_tokens", 0))
+        if cached_tokens == 0:
+            # DeepSeek reports cache hits at the top level under its own name.
+            cached_tokens = _safe_int(
+                _read_field(usage_obj, "prompt_cache_hit_tokens", 0)
+            )
         reasoning_tokens = _safe_int(
             _read_field(usage_obj, "reasoning_tokens", 0)
         )
@@ -111,7 +116,10 @@ def usage_dict_from_usage_obj(
             )
             cached_tokens = _read_nested_int(
                 prompt_details,
-                ("cached_tokens", "cache_read_tokens", "cache_read"),
+                # MiniMax/Anthropic use cache_read_input_tokens; OpenAI uses
+                # cached_tokens; others vary.
+                ("cached_tokens", "cache_read_tokens", "cache_read",
+                 "cache_read_input_tokens"),
                 0,
             )
         if reasoning_tokens == 0:

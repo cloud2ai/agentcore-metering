@@ -4,6 +4,7 @@ default_api_base: "https://api.deepseek.com"
 default_model: deepseek-chat
 settings_key: DEEPSEEK_CONFIG
 requires_api_base: false
+default_max_tokens: 16384
 models:
   - id: deepseek-chat
     label: DeepSeek V3.2 Chat
@@ -27,6 +28,12 @@ models:
       output_usd_per_1m: 2.19
       source: "https://api-docs.deepseek.com/quick_start/pricing"
       updated: "2026-02"
+  - id: deepseek-v4-pro
+    label: DeepSeek V4 Pro
+    capabilities: [text-to-text, long-context, reasoning]
+    max_input_tokens: 128000
+    max_output_tokens: 16384
+    mode: chat
   - id: deepseek-coder
     label: DeepSeek Coder
     capabilities: [text-to-text, code]

@@ -18,4 +18,4 @@ DEFAULT_TOP_P = 1.0
 # LiteLLM global retry and timeout (applied at adapter module load).
 # RateLimitError and transient failures are retried by LiteLLM up to this.
 LITELLM_NUM_RETRIES = 3
-LITELLM_REQUEST_TIMEOUT = 60
+LITELLM_REQUEST_TIMEOUT = 180
