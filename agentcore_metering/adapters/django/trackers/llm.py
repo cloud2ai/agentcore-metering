@@ -7,6 +7,7 @@ AuthenticationError, RateLimitError, and APIError with distinct logging.
 """
 import logging
 import json
+import os
 import time
 from datetime import datetime
 from decimal import Decimal
@@ -37,9 +38,72 @@ logger = logging.getLogger(__name__)
 
 TASK_LLM_CALL = "llm_call"
 JSON_RETRY_BASE_DELAY_SECONDS = 0.5
+LITELLM_TRANSIENT_RETRY_ATTEMPTS = int(
+    os.getenv("LITELLM_TRANSIENT_RETRY_ATTEMPTS", "3")
+)
+LITELLM_TRANSIENT_RETRY_BASE_DELAY_SECONDS = float(
+    os.getenv("LITELLM_TRANSIENT_RETRY_BASE_DELAY_SECONDS", "1")
+)
 
 litellm.num_retries = LITELLM_NUM_RETRIES
 litellm.request_timeout = LITELLM_REQUEST_TIMEOUT
+
+
+def _is_transient_llm_error(exc: Exception) -> bool:
+    """Return whether a LiteLLM error is worth retrying locally."""
+    if isinstance(exc, AuthenticationError):
+        return False
+    if isinstance(exc, (RateLimitError, APIError)):
+        return True
+    detail = str(exc).lower()
+    return any(
+        token in detail
+        for token in (
+            "connection error",
+            "connection reset",
+            "temporarily unavailable",
+            "temporary failure",
+            "timed out",
+            "timeout",
+            "rate limit",
+            "503",
+            "502",
+            "504",
+        )
+    )
+
+
+def _completion_with_transient_retry(
+    *,
+    params: Dict[str, Any],
+    node_name: str,
+) -> Any:
+    """
+    Retry transient LiteLLM failures before the tracker records a failed call.
+    """
+    attempts = max(1, LITELLM_TRANSIENT_RETRY_ATTEMPTS)
+    last_error = None
+    for attempt_idx in range(attempts):
+        try:
+            return litellm.completion(**params)
+        except Exception as exc:
+            last_error = exc
+            if (
+                attempt_idx >= attempts - 1
+                or not _is_transient_llm_error(exc)
+            ):
+                raise
+            delay = LITELLM_TRANSIENT_RETRY_BASE_DELAY_SECONDS * (
+                2 ** attempt_idx
+            )
+            logger.warning(
+                f"Transient LiteLLM error "
+                f"(attempt {attempt_idx + 1}/{attempts}) "
+                f"node_name={node_name} error={exc}; "
+                f"retrying in {delay:.1f}s"
+            )
+            time.sleep(delay)
+    raise last_error
 
 
 def _default_usage_dict(model: str) -> Dict[str, Any]:
@@ -274,7 +338,10 @@ class LLMTracker:
         """Single non-stream LLM call + metering persistence."""
         request_started_at = timezone.now()
         try:
-            response = litellm.completion(**params)
+            response = _completion_with_transient_retry(
+                params=params,
+                node_name=node_name,
+            )
 
             if response is None:
                 logger.error(f"LiteLLM returned None; node_name={node_name}")
@@ -668,7 +735,10 @@ class LLMTracker:
                 "stream": True,
                 "stream_options": {"include_usage": True},
             }
-            stream_response = litellm.completion(**stream_params)
+            stream_response = _completion_with_transient_retry(
+                params=stream_params,
+                node_name=node_name,
+            )
             for chunk in stream_response:
                 last_chunk = chunk
                 choices = getattr(chunk, "choices", None) or []
