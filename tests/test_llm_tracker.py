@@ -7,6 +7,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 
 from agentcore_metering.adapters.django import LLMTracker
+from agentcore_metering.adapters.django.trackers import llm as llm_tracker
 
 
 @pytest.mark.unit
@@ -51,6 +52,45 @@ class TestCallAndTrackServiceReturnsNone:
                 messages=[{"role": "user", "content": "hi"}]
             )
         assert "None" in str(exc_info.value)
+
+
+@pytest.mark.unit
+class TestTransientCompletionRetry:
+    """
+    Transient LiteLLM failures are retried before recording a failed call.
+    """
+
+    def test_retries_connection_error_before_returning_response(
+        self,
+        monkeypatch,
+    ):
+        calls = {"count": 0}
+
+        def fake_completion(**kwargs):
+            calls["count"] += 1
+            if calls["count"] == 1:
+                raise RuntimeError("Connection error.")
+            return SimpleNamespace(model="gpt-4")
+
+        monkeypatch.setattr(llm_tracker.litellm, "completion", fake_completion)
+        monkeypatch.setattr(
+            llm_tracker,
+            "LITELLM_TRANSIENT_RETRY_ATTEMPTS",
+            2,
+        )
+        monkeypatch.setattr(
+            llm_tracker,
+            "LITELLM_TRANSIENT_RETRY_BASE_DELAY_SECONDS",
+            0,
+        )
+
+        response = llm_tracker._completion_with_transient_retry(
+            params={"model": "gpt-4"},
+            node_name="test_node",
+        )
+
+        assert response.model == "gpt-4"
+        assert calls["count"] == 2
 
 
 @pytest.mark.unit
