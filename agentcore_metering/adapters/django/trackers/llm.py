@@ -2,12 +2,13 @@
 LLM call tracker using LiteLLM: completion + usage and cost tracking.
 
 Uses litellm.completion(); token/cost extraction is delegated to llm_usage.
-Applies LiteLLM global retry at module load. Handles AuthenticationError,
-RateLimitError, and APIError with distinct logging.
+Lazily applies LiteLLM global retry configuration. Handles
+AuthenticationError, RateLimitError, and APIError with distinct logging.
 """
 
-import logging
 import json
+import logging
+import os
 import time
 from datetime import datetime
 from decimal import Decimal
@@ -35,6 +36,12 @@ logger = logging.getLogger(__name__)
 
 TASK_LLM_CALL = "llm_call"
 JSON_RETRY_BASE_DELAY_SECONDS = 0.5
+LITELLM_TRANSIENT_RETRY_ATTEMPTS = int(
+    os.getenv("LITELLM_TRANSIENT_RETRY_ATTEMPTS", "3")
+)
+LITELLM_TRANSIENT_RETRY_BASE_DELAY_SECONDS = float(
+    os.getenv("LITELLM_TRANSIENT_RETRY_BASE_DELAY_SECONDS", "1")
+)
 
 _litellm_configured = False
 
@@ -46,6 +53,70 @@ def _configure_litellm() -> None:
         import litellm as _litellm
         _litellm.num_retries = LITELLM_NUM_RETRIES
         _litellm_configured = True
+
+
+def _is_transient_llm_error(exc: Exception) -> bool:
+    """Return whether a LiteLLM error is worth retrying locally."""
+    from litellm import APIError, AuthenticationError, RateLimitError
+
+    if isinstance(exc, AuthenticationError):
+        return False
+    if isinstance(exc, RateLimitError):
+        return True
+    if isinstance(exc, APIError):
+        status_code = getattr(exc, "status_code", None)
+        return status_code is None or status_code >= 500
+    detail = str(exc).lower()
+    return any(
+        token in detail
+        for token in (
+            "connection error",
+            "connection reset",
+            "temporarily unavailable",
+            "temporary failure",
+            "timed out",
+            "timeout",
+            "rate limit",
+            "503",
+            "502",
+            "504",
+        )
+    )
+
+
+def _completion_with_transient_retry(
+    *,
+    params: Dict[str, Any],
+    node_name: str,
+) -> Any:
+    """
+    Retry transient LiteLLM failures before the tracker records a failed call.
+    """
+    _configure_litellm()
+    import litellm
+
+    attempts = max(1, LITELLM_TRANSIENT_RETRY_ATTEMPTS)
+    for attempt_idx in range(attempts):
+        try:
+            return litellm.completion(**params)
+        except Exception as exc:
+            if (
+                attempt_idx >= attempts - 1
+                or not _is_transient_llm_error(exc)
+            ):
+                raise
+            delay = LITELLM_TRANSIENT_RETRY_BASE_DELAY_SECONDS * (
+                2 ** attempt_idx
+            )
+            logger.warning(
+                f"Transient LiteLLM error "
+                f"(attempt {attempt_idx + 1}/{attempts}) "
+                f"node_name={node_name} error={exc}; "
+                f"retrying in {delay:.1f}s"
+            )
+            time.sleep(delay)
+
+    raise AssertionError("Retry loop exited unexpectedly")
 
 
 def _default_usage_dict(model: str) -> Dict[str, Any]:
@@ -346,7 +417,10 @@ class LLMTracker:
         from litellm import APIError, AuthenticationError, RateLimitError
         request_started_at = timezone.now()
         try:
-            response = litellm.completion(**params)
+            response = _completion_with_transient_retry(
+                params=params,
+                node_name=node_name,
+            )
 
             if response is None:
                 logger.error(f"LiteLLM returned None; node_name={node_name}")
@@ -760,7 +834,10 @@ class LLMTracker:
                 "stream": True,
                 "stream_options": {"include_usage": True},
             }
-            stream_response = litellm.completion(**stream_params)
+            stream_response = _completion_with_transient_retry(
+                params=stream_params,
+                node_name=node_name,
+            )
             accumulated_tool_calls: dict = {}
             for chunk in stream_response:
                 last_chunk = chunk
