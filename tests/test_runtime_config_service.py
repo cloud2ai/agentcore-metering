@@ -224,7 +224,7 @@ class TestRuntimeConfigService:
             },
         )
 
-        assert params["timeout"] == 60
+        assert params["timeout"] == 180
 
     def test_provider_schema_exposes_request_timeout_seconds(self):
         schema = rc.get_provider_params_schema()
