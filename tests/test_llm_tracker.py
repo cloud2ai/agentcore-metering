@@ -91,6 +91,72 @@ class TestCallAndTrackEmptyResponse:
 
 
 @pytest.mark.unit
+class TestCallAndTrackToolCalling:
+    """
+    call_and_track forwards tools/tool_choice and returns parsed tool calls.
+    """
+
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.LLMTracker"
+        "._save_usage_to_db"
+    )
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.litellm"
+    )
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.get_litellm_params"
+    )
+    def test_tools_forwarded_and_tool_calls_returned(
+        self, mock_params, mock_litellm, mock_save_usage
+    ):
+        mock_params.return_value = {"model": "gpt-4", "api_key": "sk-x"}
+        usage = SimpleNamespace(
+            prompt_tokens=10,
+            completion_tokens=5,
+            total_tokens=15,
+        )
+        tool_call = SimpleNamespace(
+            id="call_1",
+            type="function",
+            function=SimpleNamespace(
+                name="get_weather",
+                arguments='{"city": "SF"}',
+            ),
+        )
+        # Empty content with a tool call must not raise "empty response".
+        message = SimpleNamespace(content="", tool_calls=[tool_call])
+        choice = SimpleNamespace(message=message)
+        mock_litellm.completion.return_value = SimpleNamespace(
+            choices=[choice],
+            usage=usage,
+            model="gpt-4",
+            _hidden_params={},
+        )
+
+        tools = [{"type": "function", "function": {"name": "get_weather"}}]
+        message_payload, usage_dict = LLMTracker.call_and_track(
+            messages=[{"role": "user", "content": "weather?"}],
+            tools=tools,
+            tool_choice="auto",
+            return_message=True,
+        )
+
+        # tools/tool_choice are forwarded to litellm.completion.
+        completion_kwargs = mock_litellm.completion.call_args.kwargs
+        assert completion_kwargs["tools"] == tools
+        assert completion_kwargs["tool_choice"] == "auto"
+
+        # return_message yields an assistant payload with parsed tool calls.
+        assert message_payload["role"] == "assistant"
+        assert len(message_payload["tool_calls"]) == 1
+        parsed = message_payload["tool_calls"][0]
+        assert parsed["id"] == "call_1"
+        assert parsed["function"]["name"] == "get_weather"
+        assert parsed["function"]["arguments"] == '{"city": "SF"}'
+        assert usage_dict["total_tokens"] == 15
+
+
+@pytest.mark.unit
 class TestCallAndTrackUsageExtraction:
     @patch(
         "agentcore_metering.adapters.django.trackers.llm.LLMTracker"
