@@ -552,7 +552,9 @@ class TestCallAndTrackStreaming:
                 chunks.append(next(gen))
         except StopIteration as e:
             usage_return = e.value
-        assert chunks == [("content", "Hello"), ("content", "world")]
+        # The leading space in " world" must be preserved verbatim;
+        # stripping it collapses inter-word spacing in the assembled answer.
+        assert chunks == [("content", "Hello"), ("content", " world")]
         assert usage_return is not None
         assert usage_return.get("model") == "gpt-4"
         assert mock_save_usage.called
@@ -617,3 +619,55 @@ class TestCallAndTrackStreaming:
         assert save_kwargs["prompt_tokens"] == 3
         assert save_kwargs["completion_tokens"] == 8
         assert save_kwargs["total_tokens"] == 11
+
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.LLMTracker"
+        "._save_usage_to_db"
+    )
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.litellm"
+    )
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.get_litellm_params"
+    )
+    def test_stream_preserves_whitespace_for_markdown(
+        self, mock_params, mock_litellm, mock_save_usage
+    ):
+        """Whitespace-only and leading-space deltas survive verbatim.
+
+        LLMs stream Markdown as token deltas where inter-word spaces
+        arrive as leading-space chunks (" complete") and paragraph
+        breaks arrive as whitespace-only chunks ("\\n\\n"). Stripping
+        per chunk welds words together and drops the blank lines that
+        headings/lists depend on, so the answer renders as a wall of
+        unformatted text. The assembled content must match byte-for-byte.
+        """
+        mock_params.return_value = {"model": "gpt-4", "api_key": "sk-x"}
+        deltas = [
+            "Here's", " the", " complete", " summary", ":",
+            "\n\n", "---", "\n\n", "## ", "1", ". Metering",
+        ]
+        chunks = [
+            SimpleNamespace(
+                choices=[SimpleNamespace(delta=SimpleNamespace(content=d))],
+                usage=None,
+                model="gpt-4",
+            )
+            for d in deltas
+        ]
+        mock_litellm.completion.return_value = iter(chunks)
+
+        gen = LLMTracker.call_and_track(
+            messages=[{"role": "user", "content": "hi"}],
+            stream=True,
+        )
+        streamed = "".join(
+            text for kind, text in gen if kind == "content"
+        )
+
+        assert streamed == (
+            "Here's the complete summary:\n\n---\n\n## 1. Metering"
+        )
+        # Defining symptoms of the old per-chunk strip must not reappear:
+        assert " the complete summary" in streamed   # spaces kept
+        assert "\n\n---\n\n## 1" in streamed          # blank lines kept

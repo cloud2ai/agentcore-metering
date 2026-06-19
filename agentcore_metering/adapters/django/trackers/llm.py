@@ -769,8 +769,8 @@ class LLMTracker:
                     delta, "reasoning_content"
                 ) or _read_chunk_field(delta, "reasoning")
                 if reasoning_raw is not None:
+                    # Preserve whitespace verbatim (see content branch below).
                     text = _extract_text(reasoning_raw)
-                    text = str(text).strip() if text else ""
                     if text:
                         streamed_content_len += len(text)
                         streamed_content += text
@@ -809,8 +809,12 @@ class LLMTracker:
                                 ]["arguments"] += tc_args
                 content = _read_chunk_field(delta, "content")
                 if content is not None:
+                    # Preserve whitespace verbatim. Stream chunks carry
+                    # meaningful leading/trailing spaces and whitespace-only
+                    # deltas (e.g. " ", "\n\n"); stripping per chunk collapses
+                    # inter-word spaces and drops paragraph breaks, which
+                    # corrupts the assembled Markdown answer.
                     text = _extract_text(content)
-                    text = str(text).strip() if text else ""
                     if text:
                         streamed_content_len += len(text)
                         streamed_content += text
@@ -821,9 +825,8 @@ class LLMTracker:
                         except GeneratorExit:
                             _handle_stream_stop()
                     elif isinstance(content, str):
-                        # Some providers emit empty/whitespace string chunks.
-                        # This is valid and should not be treated as shape
-                        # mismatch.
+                        # Genuinely empty string chunks ("") are valid no-ops
+                        # and must not be treated as a shape mismatch.
                         continue
                     elif not logged_unknown_shape:
                         logger.warning(
