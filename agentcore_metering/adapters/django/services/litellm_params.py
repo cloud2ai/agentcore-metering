@@ -55,12 +55,12 @@ def _model_string(provider: str, config: dict) -> str:
         provider, "gpt-4o-mini"
     )
     if provider == "openai_compatible":
-        # LiteLLM parses known prefixes (e.g. "deepseek/") from the model
-        # string and routes to the official provider, ignoring the user's
-        # api_base. Force the OpenAI client by prepending "openai/" so the
-        # full model name is forwarded to the custom endpoint as-is.
-        if model.startswith("openai/"):
-            return model
+        # LiteLLM routes by model string prefix (e.g. "deepseek/" → DeepSeek
+        # official API), ignoring api_base. Prepend "openai/" unconditionally
+        # so LiteLLM uses the OpenAI client and forwards the model name as-is
+        # to the user's custom api_base. The "openai/" prefix is a routing
+        # directive and is stripped before the request — the endpoint receives
+        # exactly what the user entered as the model name.
         return f"openai/{model}"
     if provider == "azure_openai":
         deployment = config.get("deployment") or model
