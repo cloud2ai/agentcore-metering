@@ -510,6 +510,7 @@ def run_test_call_stream(
 def get_litellm_params(
     user_id: Optional[int] = None,
     model_uuid: Optional[str] = None,
+    strict_user_scope: bool = False,
 ) -> Dict[str, Any]:
     """
     Build litellm.completion() kwargs from DB only.
@@ -517,6 +518,8 @@ def get_litellm_params(
     When model_uuid is provided, uses that LLM config (by uuid). Otherwise
     uses the earliest enabled LLM config (user scope then global). No
     settings fallback; config must exist in DB.
+
+    strict_user_scope=True: no global fallback when user_id is set.
 
     Returns:
         Dict with "model", "max_tokens", "temperature", "top_p",
@@ -528,7 +531,9 @@ def get_litellm_params(
         ValueError: If no config in DB or required config (e.g. api_key)
         is missing.
     """
-    cfg = get_config_from_db(user_id=user_id, model_uuid=model_uuid)
+    cfg = get_config_from_db(
+        user_id=user_id, model_uuid=model_uuid, strict_user_scope=strict_user_scope
+    )
 
     if cfg is not None:
         provider = cfg["provider"]

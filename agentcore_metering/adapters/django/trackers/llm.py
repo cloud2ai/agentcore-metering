@@ -202,6 +202,7 @@ class LLMTracker:
         tools: Optional[list] = None,
         tool_choice: Optional[Union[str, Dict[str, Any]]] = None,
         return_message: bool = False,
+        strict_user_scope: bool = False,
     ) -> Union[
         Tuple[str, Dict[str, Any]],
         Generator[str, None, Dict[str, Any]],
@@ -211,6 +212,8 @@ class LLMTracker:
 
         When model_uuid is provided, uses that LLM config. Otherwise uses
         the earliest enabled LLM config (user scope then global).
+
+        strict_user_scope=True: no global fallback when user_id is set.
 
         When stream=False: returns (response_content, usage_dict).
         When stream=True: returns a generator that yields content chunks;
@@ -223,7 +226,9 @@ class LLMTracker:
             raise ValueError("Messages cannot be empty")
 
         user_id = state.get("user_id") if state else None
-        params = get_litellm_params(user_id=user_id, model_uuid=model_uuid)
+        params = get_litellm_params(
+            user_id=user_id, model_uuid=model_uuid, strict_user_scope=strict_user_scope
+        )
         model = params.get("model", "unknown")
 
         if max_tokens is not None:

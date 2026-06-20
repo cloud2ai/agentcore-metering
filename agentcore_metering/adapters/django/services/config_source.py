@@ -4,6 +4,9 @@ Resolve LLM configuration from DB (global or per-user).
 When model_uuid is provided, the config with that uuid is used (must be
 active and model_type=llm). Otherwise the earliest enabled LLM config
 by created_at (then id) is used: user scope first, then global.
+
+Pass strict_user_scope=True to disable the global fallback when a user_id
+is present — the caller is then responsible for handling the None return.
 """
 from typing import Any, Dict, List, Optional, Union
 
@@ -43,6 +46,7 @@ def _config_to_dict(row: LLMConfig) -> Dict[str, Any]:
 def get_config_from_db(
     user_id: Optional[int] = None,
     model_uuid: Optional[Union[str, bytes]] = None,
+    strict_user_scope: bool = False,
 ) -> Optional[Dict[str, Any]]:
     """
     Load one LLM config from DB.
@@ -50,6 +54,9 @@ def get_config_from_db(
     If model_uuid is provided, returns that config (must be active,
     model_type=llm). Otherwise returns the earliest enabled LLM config
     by created_at: user scope first (when user_id given), then global.
+
+    strict_user_scope=True: skip the global fallback when user_id is set,
+    so callers can enforce that users must configure their own model.
 
     Returns:
         Dict with keys: provider (str), config (dict).
@@ -69,7 +76,8 @@ def get_config_from_db(
     configs: List[LLMConfig] = []
     if user_id is not None:
         configs = _get_earliest_active_configs(LLMConfig.Scope.USER, user_id)
-    if not configs:
+    # Fall back to global only when: no user context, or user context but not strict
+    if not configs and not (strict_user_scope and user_id is not None):
         configs = _get_earliest_active_configs(LLMConfig.Scope.GLOBAL, None)
     if not configs:
         return None
