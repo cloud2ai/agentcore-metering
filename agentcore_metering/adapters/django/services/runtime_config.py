@@ -17,8 +17,6 @@ from typing import Any, Dict, Generator, Optional, Tuple
 
 from django.utils import timezone
 from django.utils.translation import activate, gettext as _
-import litellm
-from litellm import completion_cost
 
 from agentcore_metering.adapters.django.models import LLMConfig, LLMUsage
 from agentcore_metering.adapters.django.services.config_source import (
@@ -179,6 +177,7 @@ def _extract_usage_from_response(
     )
     cost = None
     try:
+        from litellm import completion_cost
         raw_cost = completion_cost(completion_response=response)
         if raw_cost is not None:
             cost = Decimal(str(raw_cost))
@@ -257,6 +256,7 @@ def validate_llm_config(
             f"has_api_key={bool(params.get('api_key'))} "
             f"api_base={params.get('api_base')}"
         )
+        import litellm
         request_started_at = timezone.now()
         response = litellm.completion(**params)
         logger.info(
