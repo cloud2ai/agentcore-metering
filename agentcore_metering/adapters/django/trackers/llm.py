@@ -15,8 +15,6 @@ from typing import Any, Dict, Generator, Optional, Tuple, Union
 
 from django.db import transaction
 from django.utils import timezone
-import litellm
-from litellm import APIError, AuthenticationError, RateLimitError
 from json_repair import repair_json
 
 from agentcore_metering.adapters.django.models import LLMUsage
@@ -38,7 +36,16 @@ logger = logging.getLogger(__name__)
 TASK_LLM_CALL = "llm_call"
 JSON_RETRY_BASE_DELAY_SECONDS = 0.5
 
-litellm.num_retries = LITELLM_NUM_RETRIES
+_litellm_configured = False
+
+
+def _configure_litellm() -> None:
+    """Lazily import litellm and apply one-time global configuration."""
+    global _litellm_configured
+    if not _litellm_configured:
+        import litellm as _litellm
+        _litellm.num_retries = LITELLM_NUM_RETRIES
+        _litellm_configured = True
 
 
 def _default_usage_dict(model: str) -> Dict[str, Any]:
@@ -334,6 +341,9 @@ class LLMTracker:
         return_message: bool = False,
     ) -> Tuple[str, Dict[str, Any]]:
         """Single non-stream LLM call + metering persistence."""
+        _configure_litellm()
+        import litellm
+        from litellm import APIError, AuthenticationError, RateLimitError
         request_started_at = timezone.now()
         try:
             response = litellm.completion(**params)
@@ -575,6 +585,9 @@ class LLMTracker:
         chunk, usage from last chunk, then _save_usage_to_db.
         Returns usage as generator return value (StopIteration.value).
         """
+        _configure_litellm()
+        import litellm
+        from litellm import APIError, AuthenticationError, RateLimitError
         first_chunk_at: Optional[datetime] = None
         last_chunk = None
         streamed_content_len = 0
