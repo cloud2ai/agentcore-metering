@@ -8,7 +8,10 @@ DEFAULT_COST_CURRENCY = "USD"
 
 # Default LLM completion params when not set in config or call.
 # Override via config (api) or call_and_track(...) args.
-DEFAULT_MAX_TOKENS = 4096
+# Fallback for providers without an explicit default_max_tokens (e.g.
+# openai_compatible). 4096 truncated long-form / reasoning-model output;
+# 16384 matches the deepseek provider default and modern model norms.
+DEFAULT_MAX_TOKENS = 16384
 
 # Max tokens for connection test only. Some models reject max_tokens=1.
 TEST_MAX_TOKENS = 64
