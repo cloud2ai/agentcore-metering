@@ -9,8 +9,6 @@ import logging
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Optional
 
-from litellm import completion_cost, token_counter
-
 from agentcore_metering.adapters.django.utils import (
     _read_field,
     _read_nested_int,
@@ -29,6 +27,7 @@ def token_count_text(model: str, text: str) -> int:
     if not (text and text.strip()):
         return 0
     try:
+        from litellm import token_counter
         return int(token_counter(model=model, text=text))
     except Exception as e:
         logger.debug(f"token_counter(model={model!r}, text=...) failed: {e}")
@@ -43,6 +42,7 @@ def token_count_messages(model: str, messages: list) -> int:
     if not messages:
         return 0
     try:
+        from litellm import token_counter
         return int(token_counter(model=model, messages=messages))
     except Exception as e:
         logger.debug(
@@ -57,6 +57,7 @@ def get_cost_from_response(response: Any) -> Optional[Decimal]:
     Tries completion_cost() then response._hidden_params.response_cost.
     """
     try:
+        from litellm import completion_cost
         cost = completion_cost(completion_response=response)
         if cost is not None:
             return Decimal(str(cost))
