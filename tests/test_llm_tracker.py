@@ -671,3 +671,22 @@ class TestCallAndTrackStreaming:
         # Defining symptoms of the old per-chunk strip must not reappear:
         assert " the complete summary" in streamed   # spaces kept
         assert "\n\n---\n\n## 1" in streamed          # blank lines kept
+
+
+def test_raise_friendly_noop_when_disabled():
+    # Default (friendly_errors=False): no-op, original exception left to caller.
+    from agentcore_metering.adapters.django.trackers.llm import _raise_friendly
+
+    _raise_friendly(Exception("Insufficient Balance"), False)  # must not raise
+
+
+def test_raise_friendly_raises_when_enabled():
+    import pytest as _pytest
+
+    from agentcore_metering.adapters.django.services.runtime_config import (
+        LLMProviderError,
+    )
+    from agentcore_metering.adapters.django.trackers.llm import _raise_friendly
+
+    with _pytest.raises(LLMProviderError):
+        _raise_friendly(Exception("Insufficient Balance"), True)

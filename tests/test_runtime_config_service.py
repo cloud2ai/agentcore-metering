@@ -624,3 +624,24 @@ class TestRuntimeConfigService:
         assert ok is False
         assert detail == "LLM returned empty response"
         assert call_usage is None
+
+
+def test_classify_insufficient_balance():
+    # DeepSeek returns "Insufficient Balance" as a BadRequestError body.
+    assert (
+        rc._user_friendly_validation_error(Exception("Insufficient Balance"))
+        == "insufficient_balance"
+    )
+
+
+def test_friendly_llm_exception_balance():
+    fe = rc.friendly_llm_exception(
+        Exception('DeepseekException - {"message":"Insufficient Balance"}')
+    )
+    assert isinstance(fe, rc.LLMProviderError)
+    assert fe.error_key == "insufficient_balance"
+    assert "balance" in str(fe).lower()
+
+
+def test_friendly_llm_exception_unknown_returns_none():
+    assert rc.friendly_llm_exception(Exception("json decode error line 3")) is None
