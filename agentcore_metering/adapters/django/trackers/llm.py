@@ -48,6 +48,23 @@ def _configure_litellm() -> None:
         _litellm_configured = True
 
 
+def _raise_friendly(exc: Exception, friendly_errors: bool) -> None:
+    """Opt-in only: when friendly_errors is True and the provider error is
+    classifiable (out of balance / bad key / rate limit / timeout / ...),
+    raise a friendly LLMProviderError; otherwise return so the caller
+    re-raises the original. Default (friendly_errors=False) is a no-op, so
+    existing consumers see the raw exception exactly as before."""
+    if not friendly_errors:
+        return
+    from agentcore_metering.adapters.django.services.runtime_config import (
+        friendly_llm_exception,
+    )
+
+    friendly = friendly_llm_exception(exc)
+    if friendly is not None:
+        raise friendly from exc
+
+
 def _default_usage_dict(model: str) -> Dict[str, Any]:
     """Zero usage dict when no chunk/response usage is available."""
     return {
@@ -210,6 +227,7 @@ class LLMTracker:
         tool_choice: Optional[Union[str, Dict[str, Any]]] = None,
         return_message: bool = False,
         strict_user_scope: bool = False,
+        friendly_errors: bool = False,
     ) -> Union[
         Tuple[str, Dict[str, Any]],
         Generator[str, None, Dict[str, Any]],
@@ -286,6 +304,7 @@ class LLMTracker:
                 node_name=node_name,
                 state=state,
                 model=model,
+                friendly_errors=friendly_errors,
             )
         if not do_json_repair or not json_mode:
             return LLMTracker._call_and_track_non_stream_once(
@@ -295,6 +314,7 @@ class LLMTracker:
                 state=state,
                 model=model,
                 return_message=return_message,
+                friendly_errors=friendly_errors,
             )
 
         total_attempts = max_json_attempts
@@ -307,6 +327,7 @@ class LLMTracker:
                 state=state,
                 model=model,
                 return_message=False,
+                friendly_errors=friendly_errors,
             )
             try:
                 repaired_content = _repair_json_obj(content)
@@ -339,6 +360,7 @@ class LLMTracker:
         state: Optional[Dict],
         model: str,
         return_message: bool = False,
+        friendly_errors: bool = False,
     ) -> Tuple[str, Dict[str, Any]]:
         """Single non-stream LLM call + metering persistence."""
         _configure_litellm()
@@ -446,6 +468,7 @@ class LLMTracker:
                 is_streaming=False,
                 error_msg=str(e),
             )
+            _raise_friendly(e, friendly_errors)
             raise
         except RateLimitError as e:
             node = effective_state.get("node_name", "unknown")
@@ -462,6 +485,7 @@ class LLMTracker:
                 is_streaming=False,
                 error_msg=str(e),
             )
+            _raise_friendly(e, friendly_errors)
             raise
         except APIError as e:
             node = effective_state.get("node_name", "unknown")
@@ -478,6 +502,7 @@ class LLMTracker:
                 is_streaming=False,
                 error_msg=str(e),
             )
+            _raise_friendly(e, friendly_errors)
             raise
         except Exception as e:
             node = effective_state.get("node_name", "unknown")
@@ -494,6 +519,7 @@ class LLMTracker:
                 is_streaming=False,
                 error_msg=str(e),
             )
+            _raise_friendly(e, friendly_errors)
             raise
 
     @staticmethod
@@ -578,6 +604,7 @@ class LLMTracker:
         node_name: str,
         state: Optional[Dict],
         model: str,
+        friendly_errors: bool = False,
     ) -> Generator[tuple, None, Dict[str, Any]]:
         """
         Streaming branch: litellm.completion(stream=True), yield (kind, text)
@@ -901,6 +928,7 @@ class LLMTracker:
                 is_streaming=True,
                 error_msg=str(e),
             )
+            _raise_friendly(e, friendly_errors)
             raise
         except RateLimitError as e:
             node = effective_state.get("node_name", "unknown")
@@ -917,6 +945,7 @@ class LLMTracker:
                 is_streaming=True,
                 error_msg=str(e),
             )
+            _raise_friendly(e, friendly_errors)
             raise
         except APIError as e:
             node = effective_state.get("node_name", "unknown")
@@ -933,6 +962,7 @@ class LLMTracker:
                 is_streaming=True,
                 error_msg=str(e),
             )
+            _raise_friendly(e, friendly_errors)
             raise
         except Exception as e:
             node = effective_state.get("node_name", "unknown")
@@ -949,4 +979,5 @@ class LLMTracker:
                 is_streaming=True,
                 error_msg=str(e),
             )
+            _raise_friendly(e, friendly_errors)
             raise

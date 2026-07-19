@@ -54,6 +54,10 @@ VALIDATION_MESSAGE_IDS: Dict[str, str] = {
         "Authentication failed. Check API key or account permissions."
     ),
     "rate_limit": "Rate limit or quota exceeded. Please try again later.",
+    "insufficient_balance": (
+        "Insufficient account balance. Please top up your model provider "
+        "account and try again."
+    ),
     "not_found": (
         "Model or endpoint not found. Check model name and API base URL."
     ),
@@ -94,6 +98,16 @@ def _user_friendly_validation_error(exc: Exception) -> str:
     msg_lower = msg.lower()
     type_name = type(exc).__name__
 
+    # Out-of-balance / arrears — providers word this differently (DeepSeek:
+    # "Insufficient Balance"); check before the generic buckets.
+    if (
+        "insufficient balance" in msg_lower
+        or "insufficient_balance" in msg_lower
+        or "not enough balance" in msg_lower
+        or "arrears" in msg_lower
+        or "余额不足" in msg
+    ):
+        return "insufficient_balance"
     if (
         "401" in msg
         or "authentication" in type_name
@@ -125,6 +139,38 @@ def _user_friendly_validation_error(exc: Exception) -> str:
         return "permission_denied"
 
     return "unknown"
+
+
+class LLMProviderError(Exception):
+    """A classified, user-actionable LLM provider failure (out of balance,
+    bad key, rate limit, timeout, ...).
+
+    Raised by the tracker ONLY when the caller opts in via
+    ``friendly_errors=True``; the default behavior (re-raising the raw
+    provider/litellm exception) is unchanged, so existing consumers of this
+    library are unaffected. Carries ``error_key`` for programmatic handling
+    and a friendly, translated message as its string value.
+    """
+
+    def __init__(self, error_key: str, message: str):
+        self.error_key = error_key
+        super().__init__(message)
+
+
+def friendly_llm_exception(
+    exc: Exception, language: Optional[str] = None
+) -> Optional["LLMProviderError"]:
+    """Return an ``LLMProviderError`` with a friendly, translated message when
+    ``exc`` maps to a known, user-actionable key; otherwise ``None`` (the
+    caller should re-raise the original so unknown errors keep full detail).
+    Never raises."""
+    try:
+        key = _user_friendly_validation_error(exc)
+    except Exception:  # classification must never mask the original error
+        return None
+    if not key or key == "unknown":
+        return None
+    return LLMProviderError(key, get_validation_message(key, language))
 
 
 def _extract_usage_from_response(
