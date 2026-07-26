@@ -100,14 +100,12 @@ class TestCallAndTrackToolCalling:
         "agentcore_metering.adapters.django.trackers.llm.LLMTracker"
         "._save_usage_to_db"
     )
-    @patch(
-        "agentcore_metering.adapters.django.trackers.llm.litellm"
-    )
+    @patch("litellm.completion")
     @patch(
         "agentcore_metering.adapters.django.trackers.llm.get_litellm_params"
     )
     def test_tools_forwarded_and_tool_calls_returned(
-        self, mock_params, mock_litellm, mock_save_usage
+        self, mock_params, mock_completion, mock_save_usage
     ):
         mock_params.return_value = {"model": "gpt-4", "api_key": "sk-x"}
         usage = SimpleNamespace(
@@ -125,8 +123,11 @@ class TestCallAndTrackToolCalling:
         )
         # Empty content with a tool call must not raise "empty response".
         message = SimpleNamespace(content="", tool_calls=[tool_call])
-        choice = SimpleNamespace(message=message)
-        mock_litellm.completion.return_value = SimpleNamespace(
+        choice = SimpleNamespace(
+            message=message,
+            finish_reason="tool_calls",
+        )
+        mock_completion.return_value = SimpleNamespace(
             choices=[choice],
             usage=usage,
             model="gpt-4",
@@ -142,7 +143,7 @@ class TestCallAndTrackToolCalling:
         )
 
         # tools/tool_choice are forwarded to litellm.completion.
-        completion_kwargs = mock_litellm.completion.call_args.kwargs
+        completion_kwargs = mock_completion.call_args.kwargs
         assert completion_kwargs["tools"] == tools
         assert completion_kwargs["tool_choice"] == "auto"
 
@@ -153,6 +154,7 @@ class TestCallAndTrackToolCalling:
         assert parsed["id"] == "call_1"
         assert parsed["function"]["name"] == "get_weather"
         assert parsed["function"]["arguments"] == '{"city": "SF"}'
+        assert message_payload["finish_reason"] == "tool_calls"
         assert usage_dict["total_tokens"] == 15
 
 
@@ -561,6 +563,47 @@ class TestCallAndTrackStreaming:
         save_kwargs = mock_save_usage.call_args.kwargs
         assert save_kwargs["is_streaming"] is True
         assert save_kwargs.get("first_chunk_at") is not None
+
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.LLMTracker"
+        "._save_usage_to_db"
+    )
+    @patch("litellm.completion")
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.get_litellm_params"
+    )
+    def test_stream_returns_provider_finish_reason(
+        self, mock_params, mock_completion, mock_save_usage
+    ):
+        mock_params.return_value = {"model": "gpt-4", "api_key": "sk-x"}
+        usage = SimpleNamespace(
+            prompt_tokens=1,
+            completion_tokens=2,
+            total_tokens=3,
+        )
+        chunk = SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    delta=SimpleNamespace(content="partial"),
+                    finish_reason="length",
+                )
+            ],
+            usage=usage,
+            model="gpt-4",
+        )
+        mock_completion.return_value = iter([chunk])
+
+        gen = LLMTracker.call_and_track(
+            messages=[{"role": "user", "content": "hi"}],
+            stream=True,
+        )
+        try:
+            while True:
+                next(gen)
+        except StopIteration as exc:
+            result = exc.value
+
+        assert result["_finish_reason"] == "length"
 
     @patch(
         "agentcore_metering.adapters.django.trackers.llm.LLMTracker"
