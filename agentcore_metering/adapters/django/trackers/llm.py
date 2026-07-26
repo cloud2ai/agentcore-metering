@@ -177,14 +177,20 @@ def _extract_tool_calls(message: Any) -> list:
     return output
 
 
-def _assistant_message_payload(message: Any) -> Dict[str, Any]:
+def _assistant_message_payload(
+    message: Any,
+    finish_reason: Any = None,
+) -> Dict[str, Any]:
     """Return a serializable assistant message including tool calls."""
 
-    return {
+    payload = {
         "role": "assistant",
         "content": _read_field(message, "content") or "",
         "tool_calls": _extract_tool_calls(message),
     }
+    if finish_reason is not None:
+        payload["finish_reason"] = str(finish_reason)
+    return payload
 
 
 class LLMTracker:
@@ -428,7 +434,10 @@ class LLMTracker:
                 f"cost={cost} {cost_currency}"
             )
             if return_message:
-                return _assistant_message_payload(msg), usage
+                return _assistant_message_payload(
+                    msg,
+                    getattr(choice, "finish_reason", None),
+                ), usage
             return str(content), usage
 
         except AuthenticationError as e:
@@ -762,12 +771,18 @@ class LLMTracker:
             }
             stream_response = litellm.completion(**stream_params)
             accumulated_tool_calls: dict = {}
+            finish_reason = None
             for chunk in stream_response:
                 last_chunk = chunk
                 choices = getattr(chunk, "choices", None) or []
                 choice = choices[0] if choices else None
                 if not choice:
                     continue
+                chunk_finish_reason = _read_chunk_field(
+                    choice, "finish_reason"
+                )
+                if chunk_finish_reason is not None:
+                    finish_reason = str(chunk_finish_reason)
                 delta = _read_chunk_field(choice, "delta")
                 if delta is None:
                     # Some OpenAI-compatible gateways stream under
@@ -878,12 +893,14 @@ class LLMTracker:
                 f"model={usage['model']} "
                 f"total_tokens={usage.get('total_tokens')}"
             )
+            result = dict(usage)
             if accumulated_tool_calls:
-                return {
-                    **usage,
-                    "_tool_calls": list(accumulated_tool_calls.values()),
-                }
-            return usage
+                result["_tool_calls"] = list(
+                    accumulated_tool_calls.values()
+                )
+            if finish_reason is not None:
+                result["_finish_reason"] = finish_reason
+            return result
         except GeneratorExit:
             raise
         except AuthenticationError as e:
