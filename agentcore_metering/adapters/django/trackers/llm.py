@@ -6,8 +6,9 @@ Applies LiteLLM global retry at module load. Handles AuthenticationError,
 RateLimitError, and APIError with distinct logging.
 """
 
-import logging
 import json
+import logging
+import re
 import time
 from datetime import datetime
 from decimal import Decimal
@@ -35,6 +36,9 @@ logger = logging.getLogger(__name__)
 
 TASK_LLM_CALL = "llm_call"
 JSON_RETRY_BASE_DELAY_SECONDS = 0.5
+TRACEPARENT_PATTERN = re.compile(
+    r"^00-[0-9a-f]{32}-[0-9a-f]{16}-0[01]$"
+)
 
 _litellm_configured = False
 
@@ -194,14 +198,20 @@ def _extract_tool_calls(message: Any) -> list:
     return output
 
 
-def _assistant_message_payload(message: Any) -> Dict[str, Any]:
+def _assistant_message_payload(
+    message: Any,
+    finish_reason: Any = None,
+) -> Dict[str, Any]:
     """Return a serializable assistant message including tool calls."""
 
-    return {
+    payload = {
         "role": "assistant",
         "content": _read_field(message, "content") or "",
         "tool_calls": _extract_tool_calls(message),
     }
+    if finish_reason is not None:
+        payload["finish_reason"] = str(finish_reason)
+    return payload
 
 
 class LLMTracker:
@@ -282,6 +292,32 @@ class LLMTracker:
             **(state or {}),
             "node_name": (state_node if state_node else node_name),
         }
+        litellm_metadata = effective_state.get("litellm_metadata")
+        if isinstance(litellm_metadata, dict) and litellm_metadata:
+            existing_metadata = params.get("metadata")
+            if not isinstance(existing_metadata, dict):
+                existing_metadata = {}
+            params["metadata"] = {
+                **existing_metadata,
+                **litellm_metadata,
+            }
+        traceparent = effective_state.get("otel_traceparent")
+        if isinstance(traceparent, str) and TRACEPARENT_PATTERN.fullmatch(
+            traceparent
+        ):
+            proxy_request = params.get("proxy_server_request")
+            if not isinstance(proxy_request, dict):
+                proxy_request = {}
+            proxy_headers = proxy_request.get("headers")
+            if not isinstance(proxy_headers, dict):
+                proxy_headers = {}
+            params["proxy_server_request"] = {
+                **proxy_request,
+                "headers": {
+                    **proxy_headers,
+                    "traceparent": traceparent,
+                },
+            }
         logger.info(
             f"Starting {TASK_LLM_CALL} node_name={node_name} "
             f"model={model} message_count={len(messages)} "
@@ -450,7 +486,10 @@ class LLMTracker:
                 f"cost={cost} {cost_currency}"
             )
             if return_message:
-                return _assistant_message_payload(msg), usage
+                return _assistant_message_payload(
+                    msg,
+                    getattr(choice, "finish_reason", None),
+                ), usage
             return str(content), usage
 
         except AuthenticationError as e:
@@ -789,12 +828,18 @@ class LLMTracker:
             }
             stream_response = litellm.completion(**stream_params)
             accumulated_tool_calls: dict = {}
+            finish_reason = None
             for chunk in stream_response:
                 last_chunk = chunk
                 choices = getattr(chunk, "choices", None) or []
                 choice = choices[0] if choices else None
                 if not choice:
                     continue
+                chunk_finish_reason = _read_chunk_field(
+                    choice, "finish_reason"
+                )
+                if chunk_finish_reason is not None:
+                    finish_reason = str(chunk_finish_reason)
                 delta = _read_chunk_field(choice, "delta")
                 if delta is None:
                     # Some OpenAI-compatible gateways stream under
@@ -905,12 +950,14 @@ class LLMTracker:
                 f"model={usage['model']} "
                 f"total_tokens={usage.get('total_tokens')}"
             )
+            result = dict(usage)
             if accumulated_tool_calls:
-                return {
-                    **usage,
-                    "_tool_calls": list(accumulated_tool_calls.values()),
-                }
-            return usage
+                result["_tool_calls"] = list(
+                    accumulated_tool_calls.values()
+                )
+            if finish_reason is not None:
+                result["_finish_reason"] = finish_reason
+            return result
         except GeneratorExit:
             raise
         except AuthenticationError as e:
