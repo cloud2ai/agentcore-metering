@@ -159,6 +159,75 @@ class TestCallAndTrackToolCalling:
 
 
 @pytest.mark.unit
+class TestCallAndTrackMetadata:
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.LLMTracker"
+        "._save_usage_to_db"
+    )
+    @patch("litellm.completion")
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.get_litellm_params"
+    )
+    def test_non_stream_forwards_litellm_metadata(
+        self, mock_params, mock_completion, mock_save_usage
+    ):
+        mock_params.return_value = {
+            "model": "gpt-4",
+            "api_key": "sk-x",
+            "metadata": {"existing": "value"},
+            "proxy_server_request": {
+                "headers": {"x-request-id": "request-1"},
+            },
+        }
+        mock_completion.return_value = SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content="ok"),
+                    finish_reason="stop",
+                )
+            ],
+            usage=SimpleNamespace(
+                prompt_tokens=1,
+                completion_tokens=1,
+                total_tokens=2,
+            ),
+            model="gpt-4",
+            _hidden_params={},
+        )
+
+        LLMTracker.call_and_track(
+            messages=[{"role": "user", "content": "hi"}],
+            state={
+                "litellm_metadata": {
+                    "session_id": "session-1",
+                    "trace_metadata": {"run_uuid": "run-1"},
+                },
+                "otel_traceparent": (
+                    "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-"
+                    "bbbbbbbbbbbbbbbb-01"
+                ),
+            },
+        )
+
+        assert mock_completion.call_args.kwargs["metadata"] == {
+            "existing": "value",
+            "session_id": "session-1",
+            "trace_metadata": {"run_uuid": "run-1"},
+        }
+        assert mock_completion.call_args.kwargs[
+            "proxy_server_request"
+        ] == {
+            "headers": {
+                "x-request-id": "request-1",
+                "traceparent": (
+                    "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-"
+                    "bbbbbbbbbbbbbbbb-01"
+                ),
+            }
+        }
+
+
+@pytest.mark.unit
 class TestCallAndTrackUsageExtraction:
     @patch(
         "agentcore_metering.adapters.django.trackers.llm.LLMTracker"
@@ -563,6 +632,60 @@ class TestCallAndTrackStreaming:
         save_kwargs = mock_save_usage.call_args.kwargs
         assert save_kwargs["is_streaming"] is True
         assert save_kwargs.get("first_chunk_at") is not None
+
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.LLMTracker"
+        "._save_usage_to_db"
+    )
+    @patch("litellm.completion")
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.get_litellm_params"
+    )
+    def test_stream_forwards_litellm_metadata(
+        self, mock_params, mock_completion, mock_save_usage
+    ):
+        mock_params.return_value = {"model": "gpt-4", "api_key": "sk-x"}
+        chunk = SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    delta=SimpleNamespace(content="ok"),
+                    finish_reason="stop",
+                )
+            ],
+            usage=SimpleNamespace(
+                prompt_tokens=1,
+                completion_tokens=1,
+                total_tokens=2,
+            ),
+            model="gpt-4",
+        )
+        mock_completion.return_value = iter([chunk])
+
+        generator = LLMTracker.call_and_track(
+            messages=[{"role": "user", "content": "hi"}],
+            state={
+                "litellm_metadata": {
+                    "session_id": "session-1",
+                },
+                "otel_traceparent": (
+                    "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-"
+                    "bbbbbbbbbbbbbbbb-01"
+                ),
+            },
+            stream=True,
+        )
+        list(generator)
+
+        assert mock_completion.call_args.kwargs["metadata"] == {
+            "session_id": "session-1",
+        }
+        assert mock_completion.call_args.kwargs["stream"] is True
+        assert mock_completion.call_args.kwargs[
+            "proxy_server_request"
+        ]["headers"]["traceparent"] == (
+            "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-"
+            "bbbbbbbbbbbbbbbb-01"
+        )
 
     @patch(
         "agentcore_metering.adapters.django.trackers.llm.LLMTracker"

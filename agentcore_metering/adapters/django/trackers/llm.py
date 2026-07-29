@@ -6,8 +6,9 @@ Applies LiteLLM global retry at module load. Handles AuthenticationError,
 RateLimitError, and APIError with distinct logging.
 """
 
-import logging
 import json
+import logging
+import re
 import time
 from datetime import datetime
 from decimal import Decimal
@@ -35,6 +36,9 @@ logger = logging.getLogger(__name__)
 
 TASK_LLM_CALL = "llm_call"
 JSON_RETRY_BASE_DELAY_SECONDS = 0.5
+TRACEPARENT_PATTERN = re.compile(
+    r"^00-[0-9a-f]{32}-[0-9a-f]{16}-0[01]$"
+)
 
 _litellm_configured = False
 
@@ -288,6 +292,32 @@ class LLMTracker:
             **(state or {}),
             "node_name": (state_node if state_node else node_name),
         }
+        litellm_metadata = effective_state.get("litellm_metadata")
+        if isinstance(litellm_metadata, dict) and litellm_metadata:
+            existing_metadata = params.get("metadata")
+            if not isinstance(existing_metadata, dict):
+                existing_metadata = {}
+            params["metadata"] = {
+                **existing_metadata,
+                **litellm_metadata,
+            }
+        traceparent = effective_state.get("otel_traceparent")
+        if isinstance(traceparent, str) and TRACEPARENT_PATTERN.fullmatch(
+            traceparent
+        ):
+            proxy_request = params.get("proxy_server_request")
+            if not isinstance(proxy_request, dict):
+                proxy_request = {}
+            proxy_headers = proxy_request.get("headers")
+            if not isinstance(proxy_headers, dict):
+                proxy_headers = {}
+            params["proxy_server_request"] = {
+                **proxy_request,
+                "headers": {
+                    **proxy_headers,
+                    "traceparent": traceparent,
+                },
+            }
         logger.info(
             f"Starting {TASK_LLM_CALL} node_name={node_name} "
             f"model={model} message_count={len(messages)} "
