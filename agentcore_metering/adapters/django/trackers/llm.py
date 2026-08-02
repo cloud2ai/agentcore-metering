@@ -130,7 +130,12 @@ def _repair_json_obj(content: str) -> str:
     Raises ValueError when content cannot be repaired to valid JSON object.
     """
     if not content or not str(content).strip():
-        raise ValueError("LLM returned empty response")
+        # Distinct wording from the provider-level empty-response error in
+        # _call_and_track_non_stream_once: reaching here means the provider
+        # call itself succeeded with non-empty content at least once, so
+        # conflating the two in an error tracker hides which one actually
+        # fired. (In practice the provider-level check short-circuits first.)
+        raise ValueError("LLM returned empty response (empty JSON payload)")
 
     normalized = str(content).strip()
     if normalized.startswith("```json"):
@@ -414,22 +419,37 @@ class LLMTracker:
 
             choice = (response.choices or [None])[0]
             if not choice or not getattr(choice, "message", None):
-                raise ValueError("LLM returned empty response")
+                raise ValueError(
+                    f"LLM returned empty response "
+                    f"(no message in choice; node_name={node_name} "
+                    f"model={model})"
+                )
             msg = choice.message
             content = getattr(msg, "content", None) or ""
             tool_calls = _extract_tool_calls(msg)
             if not (content and str(content).strip()) and not tool_calls:
-                # Log diagnostic info to identify why content is empty.
+                # Carry the diagnostic in the exception message, not just a
+                # log line: callers routinely catch this and re-log only
+                # str(e) (losing the traceback), and the warning below can be
+                # invisible entirely if this logger isn't wired to a handler.
+                # Putting finish_reason inline is what makes the cause
+                # ("length" = output budget exhausted, typically by reasoning
+                # tokens, vs "content_filter" vs provider quirk) visible in
+                # error trackers instead of needing a repro.
                 finish_reason = getattr(choice, "finish_reason", None)
                 reasoning = getattr(msg, "reasoning_content", None)
-                logger.warning(
-                    f"[{node_name}] LLM returned empty content — "
+                diagnostics = (
                     f"finish_reason={finish_reason!r} "
                     f"has_reasoning_content={bool(reasoning)} "
                     f"reasoning_len={len(reasoning) if reasoning else 0} "
                     f"model={model}"
                 )
-                raise ValueError("LLM returned empty response")
+                logger.warning(
+                    f"[{node_name}] LLM returned empty content — {diagnostics}"
+                )
+                raise ValueError(
+                    f"LLM returned empty response ({diagnostics})"
+                )
 
             usage = usage_from_response(response, model)
             usage = fill_usage_with_token_fallback(
