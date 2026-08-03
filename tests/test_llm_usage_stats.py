@@ -16,7 +16,7 @@ from agentcore_metering.adapters.django.services.usage_aggregation import (
     get_time_series_stats,
     get_token_stats_from_query,
 )
-from agentcore_metering.adapters.django.models import LLMUsage
+from agentcore_metering.adapters.django.models import LLMUsage, LLMUsageSeries
 
 
 @pytest.mark.unit
@@ -236,3 +236,111 @@ class TestGetTokenStatsFromQuery:
         assert len(series) == 24
         assert sum(i["total_tokens"] for i in series) == 12
         assert sum(1 for i in series if i["total_tokens"] > 0) == 1
+
+    def test_user_series_bypasses_global_preaggregated_rows(
+        self,
+        django_user_model,
+    ):
+        selected_user = django_user_model.objects.create_user(
+            username="selected",
+        )
+        other_user = django_user_model.objects.create_user(
+            username="other",
+        )
+        bucket = django_tz.make_aware(datetime(2026, 2, 21, 7, 0, 0))
+        selected_usage = LLMUsage.objects.create(
+            user=selected_user,
+            model="selected-model",
+            completion_tokens=6,
+            total_tokens=12,
+            cost="0.123456",
+            started_at=django_tz.make_aware(
+                datetime(2026, 2, 21, 6, 59, 50)
+            ),
+            first_chunk_at=django_tz.make_aware(
+                datetime(2026, 2, 21, 6, 59, 52)
+            ),
+            is_streaming=True,
+        )
+        other_usage = LLMUsage.objects.create(
+            user=other_user,
+            model="other-model",
+            total_tokens=99,
+        )
+        LLMUsage.objects.filter(id=selected_usage.id).update(
+            created_at=bucket,
+        )
+        LLMUsage.objects.filter(id=other_usage.id).update(
+            created_at=bucket,
+        )
+        LLMUsageSeries.objects.create(
+            granularity=LLMUsageSeries.Granularity.HOUR,
+            bucket=bucket,
+            model="global-model",
+            call_count=2,
+            total_tokens=111,
+            avg_e2e_latency_sec=99,
+            avg_ttft_sec=98,
+            avg_output_tps=97,
+        )
+
+        out = get_token_stats_from_query({
+            "granularity": "day",
+            "start_date": "2026-02-21",
+            "end_date": "2026-02-21",
+            "use_series": "1",
+            "user_id": selected_user.pk,
+        })
+
+        assert out["summary"]["total_calls"] == 1
+        assert out["summary"]["total_tokens"] == 12
+        assert len(out["series_by_model"]) == 1
+        assert out["series_by_model"][0]["model"] == "selected-model"
+        assert out["series_by_model"][0]["total_tokens"] == 12
+        assert out["series_by_model"][0]["total_cost"] == 0.123456
+        assert out["series_by_model"][0]["avg_e2e_latency_sec"] == 10
+        assert out["series_by_model"][0]["avg_ttft_sec"] == 2
+        assert out["series_by_model"][0]["avg_output_tps"] == 0.6
+
+        global_out = get_token_stats_from_query({
+            "granularity": "day",
+            "start_date": "2026-02-21",
+            "end_date": "2026-02-21",
+            "use_series": "1",
+        })
+
+        assert len(global_out["series_by_model"]) == 1
+        assert global_out["series_by_model"][0]["model"] == "global-model"
+        assert global_out["series_by_model"][0]["total_tokens"] == 111
+
+    def test_user_series_fallback_excludes_other_users(
+        self,
+        django_user_model,
+    ):
+        selected_user = django_user_model.objects.create_user(
+            username="selected",
+        )
+        other_user = django_user_model.objects.create_user(
+            username="other",
+        )
+        usage = LLMUsage.objects.create(
+            user=other_user,
+            model="other-model",
+            total_tokens=99,
+        )
+        LLMUsage.objects.filter(id=usage.id).update(
+            created_at=django_tz.make_aware(
+                datetime(2026, 2, 21, 7, 0, 0)
+            ),
+        )
+
+        out = get_token_stats_from_query({
+            "granularity": "day",
+            "start_date": "2026-02-21",
+            "end_date": "2026-02-21",
+            "use_series": "1",
+            "user_id": selected_user.pk,
+        })
+
+        assert out["summary"]["total_calls"] == 0
+        assert out["series_by_model"] == []
