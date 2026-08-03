@@ -280,6 +280,7 @@ def _compute_series_from_usage(
     granularity: str,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
+    user_id: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
     """
     Compute (bucket, model) series from LLMUsage without writing to DB.
@@ -316,6 +317,8 @@ def _compute_series_from_usage(
         "success",
         "is_streaming",
     )
+    if user_id is not None:
+        qs = qs.filter(user_id=user_id)
     groups = defaultdict(
         lambda: {
             "e2e_secs": [],
@@ -432,12 +435,27 @@ def get_series_for_charts_with_fallback(
     granularity: str,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
+    user_id: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
     """
-    Return pre-aggregated series for charts. If LLMUsageSeries has no rows
-    for the range, compute from LLMUsage on the fly so the by-model charts
-    still show.
+    Return series for charts, scoped to the requested user when provided.
+
+    Pre-aggregated rows are global, so user-scoped requests always compute
+    from LLMUsage. Global requests fall back to LLMUsage when no aggregate
+    rows exist for the range.
     """
+    series_gran = VIEW_TO_SERIES_GRANULARITY.get(
+        (granularity or "").strip().lower()
+    )
+    if not series_gran:
+        raise ValueError("granularity must be one of: day, month, year")
+    if user_id is not None:
+        return _compute_series_from_usage(
+            granularity=series_gran,
+            start_date=start_date,
+            end_date=end_date,
+            user_id=user_id,
+        )
     result = get_series_for_charts(
         granularity=granularity,
         start_date=start_date,
@@ -445,11 +463,6 @@ def get_series_for_charts_with_fallback(
     )
     if result:
         return result
-    series_gran = VIEW_TO_SERIES_GRANULARITY.get(
-        (granularity or "").strip().lower()
-    )
-    if not series_gran:
-        return []
     return _compute_series_from_usage(
         granularity=series_gran,
         start_date=start_date,

@@ -401,6 +401,7 @@ def get_token_stats_from_query(params: Any) -> dict:
                     granularity=granularity,
                     start_date=start_date,
                     end_date=end_date,
+                    user_id=user_id,
                 )
             )
             series_total_calls = sum(
@@ -421,6 +422,7 @@ def get_token_stats_from_query(params: Any) -> dict:
                             granularity=series_gran,
                             start_date=start_date,
                             end_date=end_date,
+                            user_id=user_id,
                         )
                     )
         except ValueError:
