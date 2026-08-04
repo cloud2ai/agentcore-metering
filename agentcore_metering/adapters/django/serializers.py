@@ -99,7 +99,8 @@ class LLMConfigWriteSerializer(serializers.Serializer):
         help_text=(
             "Provider-specific config: api_key (required for most), model, "
             "api_base, deployment (Azure), max_tokens, temperature, top_p, "
-            "request_timeout_seconds, api_version (Azure). Use GET "
+            "request_timeout_seconds, num_retries, api_version (Azure). "
+            "Use GET "
             ".../llm-config/providers/ for per-provider required/optional "
             "keys."
         ),
@@ -438,6 +439,10 @@ class ProviderParamSchemaEntrySerializer(serializers.Serializer):
         allow_null=True,
         required=False,
         help_text="Provider default max_tokens",
+    )
+    default_num_retries = serializers.IntegerField(
+        required=False,
+        help_text="Default retries after the initial provider attempt",
     )
 
 

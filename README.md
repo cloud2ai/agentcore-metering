@@ -140,7 +140,10 @@ pytest tests -v
 - **POST/PUT body**
   - `provider` (default `openai`)
   - `config` (single JSON object, e.g. `api_key`, `model`, `api_base`,
-    `deployment`, `max_tokens`, `temperature`, `top_p`)
+    `deployment`, `max_tokens`, `temperature`, `top_p`,
+    `request_timeout_seconds`, `num_retries`)
+  - `num_retries` defaults to `3`, accepts `0` to disable retries, and is
+    applied within the single `request_timeout_seconds` budget
   - for create/list workflows: optional `scope`, `user_id`, `is_active`,
     optional `model_type`
   - required/optional keys differ by provider (e.g. Azure needs

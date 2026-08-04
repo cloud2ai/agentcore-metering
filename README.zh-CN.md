@@ -131,7 +131,8 @@ pytest tests -v
 
 - **POST/PUT body**
   - `provider`（默认 `openai`）
-  - `config`（单层 JSON，如 `api_key`、`model`、`api_base`、`deployment`、`max_tokens`、`temperature`、`top_p`）
+  - `config`（单层 JSON，如 `api_key`、`model`、`api_base`、`deployment`、`max_tokens`、`temperature`、`top_p`、`request_timeout_seconds`、`num_retries`）
+  - `num_retries` 默认值为 `3`，设为 `0` 可禁用重试；所有尝试共享同一个 `request_timeout_seconds` 超时预算
   - 创建/列表管理场景可额外传 `scope`、`user_id`、`is_active`、可选 `model_type`
   - 必填/可选键因提供商而异（如 Azure 需 `api_base`、`deployment`）
   - 可通过 `GET .../llm-config/providers/` 获取 schema

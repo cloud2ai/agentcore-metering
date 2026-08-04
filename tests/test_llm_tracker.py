@@ -839,6 +839,206 @@ class TestCallAndTrackStreaming:
         assert "\n\n---\n\n## 1" in streamed          # blank lines kept
 
 
+@pytest.mark.unit
+class TestCallAndTrackProviderRetries:
+    class TransientProviderError(Exception):
+        status_code = 503
+
+    @staticmethod
+    def _response(content="ok"):
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content=content),
+                    finish_reason="stop",
+                )
+            ],
+            usage=SimpleNamespace(
+                prompt_tokens=1,
+                completion_tokens=1,
+                total_tokens=2,
+            ),
+            model="gpt-4",
+            _hidden_params={},
+        )
+
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.LLMTracker"
+        "._save_usage_to_db"
+    )
+    @patch("litellm.completion")
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.get_litellm_params"
+    )
+    @patch(
+        "agentcore_metering.adapters.django.services.litellm_retry.time.sleep"
+    )
+    def test_non_stream_retry_saves_successful_usage_once(
+        self, mock_sleep, mock_params, mock_completion, mock_save_usage
+    ):
+        mock_params.return_value = {
+            "model": "gpt-4",
+            "api_key": "sk-x",
+            "timeout": 30,
+            "num_retries": 2,
+        }
+        mock_completion.side_effect = [
+            self.TransientProviderError("busy"),
+            self._response(),
+        ]
+        state = {}
+
+        content, usage = LLMTracker.call_and_track(
+            messages=[{"role": "user", "content": "hi"}],
+            state=state,
+        )
+
+        assert content == "ok"
+        assert usage["total_tokens"] == 2
+        assert mock_completion.call_count == 2
+        assert mock_save_usage.call_count == 1
+        assert len(state["llm_calls"]) == 1
+        assert state["llm_calls"][0]["success"] is True
+
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.LLMTracker"
+        "._save_usage_to_db"
+    )
+    @patch("litellm.completion")
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.get_litellm_params"
+    )
+    @patch(
+        "agentcore_metering.adapters.django.services.litellm_retry.time.sleep"
+    )
+    def test_retry_is_independent_of_previous_failure_in_same_process(
+        self, mock_sleep, mock_params, mock_completion, mock_save_usage
+    ):
+        mock_params.return_value = {
+            "model": "gpt-4",
+            "api_key": "sk-x",
+            "timeout": 30,
+            "num_retries": 1,
+        }
+        mock_completion.side_effect = [
+            self.TransientProviderError("first attempt"),
+            self.TransientProviderError("first call exhausted"),
+            self.TransientProviderError("second call first attempt"),
+            self._response("second call succeeded"),
+        ]
+
+        with pytest.raises(self.TransientProviderError):
+            LLMTracker.call_and_track(
+                messages=[{"role": "user", "content": "first"}]
+            )
+
+        content, _usage = LLMTracker.call_and_track(
+            messages=[{"role": "user", "content": "second"}]
+        )
+
+        assert content == "second call succeeded"
+        assert mock_completion.call_count == 4
+        assert mock_save_usage.call_count == 2
+
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.LLMTracker"
+        "._save_usage_to_db"
+    )
+    @patch("litellm.completion")
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.get_litellm_params"
+    )
+    @patch(
+        "agentcore_metering.adapters.django.services.litellm_retry.time.sleep"
+    )
+    def test_stream_retries_failure_before_first_content(
+        self, mock_sleep, mock_params, mock_completion, mock_save_usage
+    ):
+        mock_params.return_value = {
+            "model": "gpt-4",
+            "api_key": "sk-x",
+            "timeout": 30,
+            "num_retries": 2,
+        }
+
+        def failing_stream():
+            raise self.TransientProviderError("busy")
+            yield
+
+        chunk = SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    delta=SimpleNamespace(content="recovered"),
+                    finish_reason="stop",
+                )
+            ],
+            usage=SimpleNamespace(
+                prompt_tokens=1,
+                completion_tokens=1,
+                total_tokens=2,
+            ),
+            model="gpt-4",
+        )
+        mock_completion.side_effect = [failing_stream(), iter([chunk])]
+
+        chunks = list(
+            LLMTracker.call_and_track(
+                messages=[{"role": "user", "content": "hi"}],
+                stream=True,
+            )
+        )
+
+        assert chunks == [("content", "recovered")]
+        assert mock_completion.call_count == 2
+        assert mock_save_usage.call_count == 1
+        assert mock_save_usage.call_args.kwargs["success"] is True
+
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.LLMTracker"
+        "._save_usage_to_db"
+    )
+    @patch("litellm.completion")
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.get_litellm_params"
+    )
+    def test_stream_does_not_retry_failure_after_first_content(
+        self, mock_params, mock_completion, mock_save_usage
+    ):
+        mock_params.return_value = {
+            "model": "gpt-4",
+            "api_key": "sk-x",
+            "timeout": 30,
+            "num_retries": 2,
+        }
+
+        def partially_failing_stream():
+            yield SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        delta=SimpleNamespace(content="partial"),
+                        finish_reason=None,
+                    )
+                ],
+                usage=None,
+                model="gpt-4",
+            )
+            raise self.TransientProviderError("busy after content")
+
+        mock_completion.return_value = partially_failing_stream()
+        stream = LLMTracker.call_and_track(
+            messages=[{"role": "user", "content": "hi"}],
+            stream=True,
+        )
+
+        assert next(stream) == ("content", "partial")
+        with pytest.raises(self.TransientProviderError):
+            next(stream)
+
+        assert mock_completion.call_count == 1
+        assert mock_save_usage.call_count == 1
+        assert mock_save_usage.call_args.kwargs["success"] is False
+
+
 def test_raise_friendly_noop_when_disabled():
     # Default (friendly_errors=False): no-op, original exception left to caller.
     from agentcore_metering.adapters.django.trackers.llm import _raise_friendly
