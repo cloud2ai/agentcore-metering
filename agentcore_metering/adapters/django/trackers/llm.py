@@ -2,7 +2,7 @@
 LLM call tracker using LiteLLM: completion + usage and cost tracking.
 
 Uses litellm.completion(); token/cost extraction is delegated to llm_usage.
-Applies LiteLLM global retry at module load. Handles AuthenticationError,
+Applies a deterministic per-call retry budget. Handles AuthenticationError,
 RateLimitError, and APIError with distinct logging.
 """
 
@@ -22,15 +22,16 @@ from agentcore_metering.adapters.django.models import LLMUsage
 from agentcore_metering.adapters.django.services.runtime_config import (
     get_litellm_params,
 )
+from agentcore_metering.adapters.django.services.litellm_retry import (
+    completion_with_retry,
+    iter_completion_with_retry,
+)
 from agentcore_metering.adapters.django.trackers.llm_usage import (
     fill_usage_with_token_fallback,
     usage_from_response,
     usage_from_stream_chunk,
 )
-from agentcore_metering.constants import (
-    DEFAULT_COST_CURRENCY,
-    LITELLM_NUM_RETRIES,
-)
+from agentcore_metering.constants import DEFAULT_COST_CURRENCY
 
 logger = logging.getLogger(__name__)
 
@@ -39,18 +40,6 @@ JSON_RETRY_BASE_DELAY_SECONDS = 0.5
 TRACEPARENT_PATTERN = re.compile(
     r"^00-[0-9a-f]{32}-[0-9a-f]{16}-0[01]$"
 )
-
-_litellm_configured = False
-
-
-def _configure_litellm() -> None:
-    """Lazily import litellm and apply one-time global configuration."""
-    global _litellm_configured
-    if not _litellm_configured:
-        import litellm as _litellm
-        _litellm.num_retries = LITELLM_NUM_RETRIES
-        _litellm_configured = True
-
 
 def _raise_friendly(exc: Exception, friendly_errors: bool) -> None:
     """Opt-in only: when friendly_errors is True and the provider error is
@@ -404,12 +393,11 @@ class LLMTracker:
         friendly_errors: bool = False,
     ) -> Tuple[str, Dict[str, Any]]:
         """Single non-stream LLM call + metering persistence."""
-        _configure_litellm()
         import litellm
         from litellm import APIError, AuthenticationError, RateLimitError
         request_started_at = timezone.now()
         try:
-            response = litellm.completion(**params)
+            response = completion_with_retry(litellm.completion, params)
 
             if response is None:
                 logger.error(f"LiteLLM returned None; node_name={node_name}")
@@ -671,7 +659,6 @@ class LLMTracker:
         chunk, usage from last chunk, then _save_usage_to_db.
         Returns usage as generator return value (StopIteration.value).
         """
-        _configure_litellm()
         import litellm
         from litellm import APIError, AuthenticationError, RateLimitError
         first_chunk_at: Optional[datetime] = None
@@ -679,6 +666,19 @@ class LLMTracker:
         streamed_content_len = 0
         streamed_content = ""
         logged_unknown_shape = False
+        accumulated_tool_calls: dict = {}
+        finish_reason = None
+
+        def _reset_stream_attempt() -> None:
+            nonlocal last_chunk, logged_unknown_shape
+            nonlocal accumulated_tool_calls, finish_reason
+            last_chunk = None
+            logged_unknown_shape = False
+            accumulated_tool_calls = {}
+            finish_reason = None
+
+        def _has_emitted() -> bool:
+            return first_chunk_at is not None
 
         def _extract_text(value: Any) -> str:
             """
@@ -846,10 +846,12 @@ class LLMTracker:
                 "stream": True,
                 "stream_options": {"include_usage": True},
             }
-            stream_response = litellm.completion(**stream_params)
-            accumulated_tool_calls: dict = {}
-            finish_reason = None
-            for chunk in stream_response:
+            for chunk in iter_completion_with_retry(
+                litellm.completion,
+                stream_params,
+                has_emitted=_has_emitted,
+                on_retry=_reset_stream_attempt,
+            ):
                 last_chunk = chunk
                 choices = getattr(chunk, "choices", None) or []
                 choice = choices[0] if choices else None

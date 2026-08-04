@@ -13,8 +13,9 @@ from agentcore_metering.adapters.django.llm_static.load import (
 from agentcore_metering.constants import (
     DEFAULT_MAX_TOKENS,
     DEFAULT_TEMPERATURE,
-    LITELLM_REQUEST_TIMEOUT,
     DEFAULT_TOP_P,
+    LITELLM_NUM_RETRIES,
+    LITELLM_REQUEST_TIMEOUT,
 )
 
 _yaml_defaults = get_provider_defaults()
@@ -149,6 +150,23 @@ def _litellm_kwargs_from_config(provider: str, config: dict) -> Dict[str, Any]:
                 "request_timeout_seconds must be a positive integer"
             )
         kwargs["timeout"] = timeout_seconds
+    retries_value = config.get("num_retries")
+    if retries_value is None or retries_value == "":
+        kwargs["num_retries"] = LITELLM_NUM_RETRIES
+    else:
+        if isinstance(retries_value, bool):
+            raise ValueError("num_retries must be an integer from 0 to 10")
+        try:
+            num_retries = int(retries_value)
+        except (TypeError, ValueError):
+            raise ValueError("num_retries must be an integer from 0 to 10")
+        if isinstance(retries_value, float) and not retries_value.is_integer():
+            raise ValueError("num_retries must be an integer from 0 to 10")
+        if str(retries_value).strip() != str(num_retries):
+            raise ValueError("num_retries must be an integer from 0 to 10")
+        if num_retries < 0 or num_retries > 10:
+            raise ValueError("num_retries must be an integer from 0 to 10")
+        kwargs["num_retries"] = num_retries
     kwargs["drop_params"] = True
     return {k: v for k, v in kwargs.items() if v is not None}
 
@@ -218,6 +236,7 @@ def get_provider_params_schema() -> Dict[str, Any]:
         "temperature",
         "top_p",
         "request_timeout_seconds",
+        "num_retries",
     ]
     editable_common = [
         "api_base",
@@ -227,6 +246,7 @@ def get_provider_params_schema() -> Dict[str, Any]:
         "temperature",
         "top_p",
         "request_timeout_seconds",
+        "num_retries",
     ]
     providers = {}
     for p in DEFAULT_MODELS:
@@ -241,6 +261,7 @@ def get_provider_params_schema() -> Dict[str, Any]:
                 "temperature",
                 "top_p",
                 "request_timeout_seconds",
+                "num_retries",
             ]
             editable = [
                 "api_base",
@@ -252,6 +273,7 @@ def get_provider_params_schema() -> Dict[str, Any]:
                 "temperature",
                 "top_p",
                 "request_timeout_seconds",
+                "num_retries",
             ]
         else:
             optional = optional_common.copy()
@@ -265,5 +287,6 @@ def get_provider_params_schema() -> Dict[str, Any]:
             "default_temperature": OFFICIAL_DEFAULT_TEMPERATURES.get(p),
             "default_top_p": OFFICIAL_DEFAULT_TOP_P.get(p),
             "default_max_tokens": OFFICIAL_DEFAULT_MAX_TOKENS.get(p),
+            "default_num_retries": LITELLM_NUM_RETRIES,
         }
     return {"providers": providers}

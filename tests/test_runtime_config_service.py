@@ -1,5 +1,6 @@
 import logging
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 from django.test import override_settings
@@ -226,6 +227,41 @@ class TestRuntimeConfigService:
 
         assert params["timeout"] == 180
 
+    def test_build_litellm_params_uses_default_per_call_retries(self):
+        params = rc.build_litellm_params_from_config(
+            "openai",
+            {
+                "api_key": "k",
+                "model": "gpt-4o-mini",
+            },
+        )
+
+        assert params["num_retries"] == 3
+
+    def test_build_litellm_params_allows_disabling_retries(self):
+        params = rc.build_litellm_params_from_config(
+            "openai",
+            {
+                "api_key": "k",
+                "model": "gpt-4o-mini",
+                "num_retries": 0,
+            },
+        )
+
+        assert params["num_retries"] == 0
+
+    @pytest.mark.parametrize("value", [-1, 1.5, True, "invalid"])
+    def test_build_litellm_params_rejects_invalid_num_retries(self, value):
+        with pytest.raises(ValueError, match="num_retries"):
+            rc.build_litellm_params_from_config(
+                "openai",
+                {
+                    "api_key": "k",
+                    "model": "gpt-4o-mini",
+                    "num_retries": value,
+                },
+            )
+
     def test_provider_schema_exposes_request_timeout_seconds(self):
         schema = rc.get_provider_params_schema()
 
@@ -235,6 +271,15 @@ class TestRuntimeConfigService:
             assert (
                 "request_timeout_seconds" in provider_schema["editable_params"]
             )
+
+    def test_provider_schema_exposes_num_retries(self):
+        schema = rc.get_provider_params_schema()
+
+        for provider in ("openai", "azure_openai"):
+            provider_schema = schema["providers"][provider]
+            assert "num_retries" in provider_schema["optional"]
+            assert "num_retries" in provider_schema["editable_params"]
+            assert provider_schema["default_num_retries"] == 3
 
     def test_build_litellm_params_moonshot_uses_raw_model_id(self):
         params = rc.build_litellm_params_from_config(
@@ -329,6 +374,35 @@ class TestRuntimeConfigService:
             )
 
         assert "api_base" in str(exc_info.value)
+
+    @patch("litellm.completion")
+    @patch(
+        "agentcore_metering.adapters.django.services.litellm_retry.time.sleep"
+    )
+    def test_validate_llm_config_retries_transient_failure(
+        self, mock_sleep, mock_completion
+    ):
+        class TransientProviderError(Exception):
+            status_code = 503
+
+        mock_completion.side_effect = [
+            TransientProviderError("busy"),
+            _mock_completion_response(),
+        ]
+
+        ok, error = rc.validate_llm_config(
+            "openai",
+            {
+                "api_key": "k",
+                "model": "gpt-4o-mini",
+                "num_retries": 1,
+            },
+        )
+
+        assert ok is True
+        assert error == ""
+        assert mock_completion.call_count == 2
+        assert mock_sleep.call_count == 1
 
     def test_validate_llm_config_success_records_usage(
         self, django_user_model, monkeypatch

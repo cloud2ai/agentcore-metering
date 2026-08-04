@@ -18,7 +18,8 @@ TEST_MAX_TOKENS = 64
 DEFAULT_TEMPERATURE = 0.7
 DEFAULT_TOP_P = 1.0
 
-# LiteLLM global retry and timeout (applied at adapter module load).
-# RateLimitError and transient failures are retried by LiteLLM up to this.
+# Per-call retry and timeout defaults. Agentcore owns the retry loop and
+# explicitly disables LiteLLM/process-global retries on each underlying
+# invocation.
 LITELLM_NUM_RETRIES = 3
 LITELLM_REQUEST_TIMEOUT = 180

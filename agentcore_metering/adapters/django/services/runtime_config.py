@@ -28,6 +28,9 @@ from agentcore_metering.adapters.django.services.litellm_params import (
     build_litellm_params_from_config,
     get_provider_params_schema,
 )
+from agentcore_metering.adapters.django.services.litellm_retry import (
+    completion_with_retry,
+)
 from agentcore_metering.adapters.django.utils import (
     _read_field,
     _read_nested_int,
@@ -304,7 +307,7 @@ def validate_llm_config(
         )
         import litellm
         request_started_at = timezone.now()
-        response = litellm.completion(**params)
+        response = completion_with_retry(litellm.completion, params)
         logger.info(
             "LLM validate response "
             f"provider={provider} user_id={user_id} "
