@@ -89,6 +89,87 @@ class TestCallAndTrackEmptyResponse:
             )
         assert "empty" in str(exc_info.value).lower()
 
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.LLMTracker"
+        "._save_usage_to_db"
+    )
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.litellm"
+    )
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.get_litellm_params"
+    )
+    def test_empty_response_persists_raw_reasoning_for_diagnosis(
+        self, mock_params, mock_litellm, mock_save_usage
+    ):
+        """The exception message only carries reasoning_len (a count) —
+        the raw text has to survive into the persisted usage row, or a
+        future failure is exactly as undiagnosable as this one was."""
+        mock_params.return_value = {"model": "gpt-4", "api_key": "sk-x"}
+        msg = MagicMock()
+        msg.content = ""
+        msg.reasoning_content = "the model thought about it and stopped"
+        choice = MagicMock()
+        choice.message = msg
+        choice.finish_reason = "stop"
+        mock_litellm.completion.return_value = MagicMock(
+            choices=[choice],
+            usage=MagicMock(
+                prompt_tokens=0, completion_tokens=0, total_tokens=0,
+            ),
+            model="gpt-4",
+        )
+
+        with pytest.raises(ValueError):
+            LLMTracker.call_and_track(
+                messages=[{"role": "user", "content": "hi"}]
+            )
+
+        saved_state = mock_save_usage.call_args.kwargs["state"]
+        diagnostics = saved_state["metadata"]["empty_response_diagnostics"]
+        assert diagnostics["finish_reason"] == "stop"
+        assert diagnostics["reasoning_content"] == (
+            "the model thought about it and stopped"
+        )
+        assert diagnostics["content_repr"] == repr("")
+
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.LLMTracker"
+        "._save_usage_to_db"
+    )
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.litellm"
+    )
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.get_litellm_params"
+    )
+    def test_empty_response_reasoning_capture_is_truncated(
+        self, mock_params, mock_litellm, mock_save_usage
+    ):
+        mock_params.return_value = {"model": "gpt-4", "api_key": "sk-x"}
+        msg = MagicMock()
+        msg.content = ""
+        msg.reasoning_content = "x" * 10_000
+        choice = MagicMock()
+        choice.message = msg
+        choice.finish_reason = "length"
+        mock_litellm.completion.return_value = MagicMock(
+            choices=[choice],
+            usage=MagicMock(
+                prompt_tokens=0, completion_tokens=0, total_tokens=0,
+            ),
+            model="gpt-4",
+        )
+
+        with pytest.raises(ValueError):
+            LLMTracker.call_and_track(
+                messages=[{"role": "user", "content": "hi"}]
+            )
+
+        saved_state = mock_save_usage.call_args.kwargs["state"]
+        diagnostics = saved_state["metadata"]["empty_response_diagnostics"]
+        assert len(diagnostics["reasoning_content"]) == 4000
+
 
 @pytest.mark.unit
 class TestCallAndTrackToolCalling:
