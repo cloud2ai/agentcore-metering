@@ -36,6 +36,14 @@ logger = logging.getLogger(__name__)
 
 TASK_LLM_CALL = "llm_call"
 JSON_RETRY_BASE_DELAY_SECONDS = 0.5
+# Empty-response diagnostics (see _call_and_track_non_stream_once) capture
+# the raw reasoning_content text, not just its length — the length alone
+# (already in the exception message) isn't enough to tell "reasoning ate
+# the output budget" (finish_reason='length') apart from "model stopped
+# normally but wrote nothing visible" (finish_reason='stop'), which turned
+# out to be two different failure modes with two different causes. Capped
+# so a runaway reasoning block can't bloat the metadata column.
+EMPTY_RESPONSE_REASONING_CAPTURE_CHARS = 4000
 TRACEPARENT_PATTERN = re.compile(
     r"^00-[0-9a-f]{32}-[0-9a-f]{16}-0[01]$"
 )
@@ -447,6 +455,21 @@ class LLMTracker:
                 logger.warning(
                     f"[{node_name}] LLM returned empty content — {diagnostics}"
                 )
+                # The exception message above only carries reasoning_len —
+                # enough to see THAT it happened, not enough to diagnose
+                # WHY. Stash the raw text into effective_state["metadata"]
+                # so _record_failed_llm_call's _save_usage_to_db call (a few
+                # frames up, in the except block) persists it on the usage
+                # row instead of it being lost with the stack.
+                effective_state.setdefault("metadata", {})[
+                    "empty_response_diagnostics"
+                ] = {
+                    "finish_reason": finish_reason,
+                    "content_repr": repr(content)[:200],
+                    "reasoning_content": (reasoning or "")[
+                        :EMPTY_RESPONSE_REASONING_CAPTURE_CHARS
+                    ],
+                }
                 raise ValueError(
                     f"LLM returned empty response ({diagnostics})"
                 )
