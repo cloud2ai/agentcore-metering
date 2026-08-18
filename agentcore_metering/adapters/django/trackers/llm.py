@@ -228,6 +228,7 @@ class LLMTracker:
         max_tokens: Optional[int] = None,
         temperature: Optional[float] = None,
         top_p: Optional[float] = None,
+        reasoning_effort: Optional[str] = None,
         response_format: Optional[Dict] = None,
         node_name: str = "unknown",
         state: Optional[Dict] = None,
@@ -274,6 +275,8 @@ class LLMTracker:
             params["temperature"] = temperature
         if top_p is not None:
             params["top_p"] = top_p
+        if reasoning_effort is not None:
+            params["reasoning_effort"] = reasoning_effort
         if tools is not None:
             params["tools"] = tools
         if tool_choice is not None:
