@@ -3,10 +3,26 @@ Tests for trackers.llm.LLMTracker (LiteLLM): call_and_track exception paths.
 """
 from datetime import datetime
 from types import SimpleNamespace
-import pytest
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from agentcore_metering.adapters.django import LLMTracker
+from agentcore_metering.adapters.django.trackers.llm import (
+    _assistant_message_payload,
+)
+
+
+def test_assistant_message_payload_preserves_reasoning_content():
+    message = SimpleNamespace(
+        content="answer",
+        reasoning_content="complete reasoning",
+        tool_calls=[],
+    )
+
+    payload = _assistant_message_payload(message, "stop")
+
+    assert payload["reasoning_content"] == "complete reasoning"
 
 
 @pytest.mark.unit
