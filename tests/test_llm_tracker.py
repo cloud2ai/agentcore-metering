@@ -3,6 +3,7 @@ Tests for trackers.llm.LLMTracker (LiteLLM): call_and_track exception paths.
 """
 from datetime import datetime
 from types import SimpleNamespace
+import json
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -169,6 +170,208 @@ class TestCallAndTrackEmptyResponse:
         saved_state = mock_save_usage.call_args.kwargs["state"]
         diagnostics = saved_state["metadata"]["empty_response_diagnostics"]
         assert len(diagnostics["reasoning_content"]) == 4000
+
+
+@pytest.mark.unit
+class TestCallAndTrackReasoningContentRecovery:
+    """
+    #223: deepseek-v4-flash sometimes writes its full JSON answer into
+    reasoning_content and leaves content empty under forced json_object
+    mode, reporting finish_reason='stop' as if nothing were wrong. When
+    that reasoning text is itself valid JSON, recover it instead of
+    failing the call — but only under json_mode, where a JSON object is
+    actually expected.
+    """
+
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.LLMTracker"
+        "._save_usage_to_db"
+    )
+    @patch("litellm.completion")
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.get_litellm_params"
+    )
+    def test_json_mode_recovers_valid_json_from_reasoning_content(
+        self, mock_params, mock_completion, mock_save_usage
+    ):
+        mock_params.return_value = {"model": "deepseek/deepseek-v4-flash"}
+        answer = '{"verdict": "rejected", "confidence": 0.95}'
+        message = SimpleNamespace(content="", reasoning_content=answer)
+        choice = SimpleNamespace(message=message, finish_reason="stop")
+        mock_completion.return_value = SimpleNamespace(
+            choices=[choice],
+            usage=SimpleNamespace(
+                prompt_tokens=10, completion_tokens=0, total_tokens=10,
+            ),
+            model="deepseek/deepseek-v4-flash",
+            _hidden_params={},
+        )
+
+        content, usage = LLMTracker.call_and_track(
+            messages=[{"role": "system", "content": "review this"}],
+            json_mode=True,
+        )
+
+        assert json.loads(content) == json.loads(answer)
+        saved_kwargs = mock_save_usage.call_args.kwargs
+        assert saved_kwargs["success"] is True
+        assert saved_kwargs["state"]["metadata"][
+            "recovered_from_reasoning_content"
+        ] is True
+
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.LLMTracker"
+        "._save_usage_to_db"
+    )
+    @patch("litellm.completion")
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.get_litellm_params"
+    )
+    def test_json_mode_recovery_reaches_return_message_payload(
+        self, mock_params, mock_completion, mock_save_usage
+    ):
+        """return_message must reflect the recovered content, not the raw
+        (empty) message.content — it builds its payload straight from the
+        response message, so recovery has to be threaded through
+        explicitly or this path silently loses it."""
+        mock_params.return_value = {"model": "deepseek/deepseek-v4-flash"}
+        answer = '{"verdict": "passed", "confidence": 0.9}'
+        message = SimpleNamespace(content="", reasoning_content=answer)
+        choice = SimpleNamespace(message=message, finish_reason="stop")
+        mock_completion.return_value = SimpleNamespace(
+            choices=[choice],
+            usage=SimpleNamespace(
+                prompt_tokens=10, completion_tokens=0, total_tokens=10,
+            ),
+            model="deepseek/deepseek-v4-flash",
+            _hidden_params={},
+        )
+
+        payload, _usage = LLMTracker.call_and_track(
+            messages=[{"role": "system", "content": "review this"}],
+            json_mode=True,
+            json_repair=False,
+            return_message=True,
+        )
+
+        assert json.loads(payload["content"]) == json.loads(answer)
+
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.LLMTracker"
+        "._save_usage_to_db"
+    )
+    @patch("litellm.completion")
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.get_litellm_params"
+    )
+    def test_non_json_mode_does_not_recover_from_reasoning_content(
+        self, mock_params, mock_completion, mock_save_usage
+    ):
+        """Outside json_mode, reasoning_content is genuine chain-of-thought
+        prose, not a misplaced answer — even if it happens to parse as
+        JSON, treating it as the response would smuggle unvetted text past
+        a caller that never asked for structured output."""
+        mock_params.return_value = {"model": "deepseek/deepseek-v4-flash"}
+        message = SimpleNamespace(
+            content="", reasoning_content='{"looks": "like json"}'
+        )
+        choice = SimpleNamespace(message=message, finish_reason="stop")
+        mock_completion.return_value = SimpleNamespace(
+            choices=[choice],
+            usage=SimpleNamespace(
+                prompt_tokens=10, completion_tokens=0, total_tokens=10,
+            ),
+            model="deepseek/deepseek-v4-flash",
+            _hidden_params={},
+        )
+
+        with pytest.raises(ValueError, match="empty"):
+            LLMTracker.call_and_track(
+                messages=[{"role": "user", "content": "hi"}],
+                json_mode=False,
+            )
+
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.LLMTracker"
+        "._save_usage_to_db"
+    )
+    @patch("litellm.completion")
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.get_litellm_params"
+    )
+    def test_json_mode_does_not_recover_on_length_truncation(
+        self, mock_params, mock_completion, mock_save_usage
+    ):
+        """finish_reason='length' (#177 — output budget exhausted) must
+        never go through recovery, even when the truncated reasoning text
+        happens to repair into syntactically valid JSON: json_repair closes
+        brackets around whatever fields landed before the cutoff, which can
+        fabricate a complete-looking {"verdict": "passed", "confidence":
+        0.95} out of a review that never finished. Confirmed by hand:
+        repair_json('{"verdict": "passed", "confidence": 0.95, "reason":
+        "cle') returns exactly that, dropping nothing that looks wrong.
+        Only finish_reason='stop' (model claims it finished on its own) is
+        trusted enough to recover from."""
+        mock_params.return_value = {"model": "deepseek/deepseek-v4-flash"}
+        truncated_but_parseable = (
+            '{"verdict": "passed", "confidence": 0.95, "reason": "cle'
+        )
+        message = SimpleNamespace(
+            content="", reasoning_content=truncated_but_parseable
+        )
+        choice = SimpleNamespace(message=message, finish_reason="length")
+        mock_completion.return_value = SimpleNamespace(
+            choices=[choice],
+            usage=SimpleNamespace(
+                prompt_tokens=10, completion_tokens=0, total_tokens=10,
+            ),
+            model="deepseek/deepseek-v4-flash",
+            _hidden_params={},
+        )
+
+        with pytest.raises(ValueError, match="empty"):
+            LLMTracker.call_and_track(
+                messages=[{"role": "user", "content": "hi"}],
+                json_mode=True,
+            )
+
+        saved_kwargs = mock_save_usage.call_args.kwargs
+        assert saved_kwargs["success"] is False
+
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.LLMTracker"
+        "._save_usage_to_db"
+    )
+    @patch("litellm.completion")
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.get_litellm_params"
+    )
+    def test_json_mode_does_not_recover_non_json_reasoning_content(
+        self, mock_params, mock_completion, mock_save_usage
+    ):
+        mock_params.return_value = {"model": "deepseek/deepseek-v4-flash"}
+        message = SimpleNamespace(
+            content="",
+            reasoning_content="the model thought about it and stopped",
+        )
+        choice = SimpleNamespace(message=message, finish_reason="stop")
+        mock_completion.return_value = SimpleNamespace(
+            choices=[choice],
+            usage=SimpleNamespace(
+                prompt_tokens=10, completion_tokens=0, total_tokens=10,
+            ),
+            model="deepseek/deepseek-v4-flash",
+            _hidden_params={},
+        )
+
+        with pytest.raises(ValueError, match="empty"):
+            LLMTracker.call_and_track(
+                messages=[{"role": "user", "content": "hi"}],
+                json_mode=True,
+            )
+
+        saved_kwargs = mock_save_usage.call_args.kwargs
+        assert saved_kwargs["success"] is False
 
 
 @pytest.mark.unit

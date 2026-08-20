@@ -203,12 +203,21 @@ def _extract_tool_calls(message: Any) -> list:
 def _assistant_message_payload(
     message: Any,
     finish_reason: Any = None,
+    content: Any = None,
 ) -> Dict[str, Any]:
-    """Return a serializable assistant message including tool calls."""
+    """Return a serializable assistant message including tool calls.
+
+    content overrides the raw message content when the caller already
+    resolved it (e.g. recovered from reasoning_content) — reading
+    message.content directly here would silently discard that recovery.
+    """
 
     payload = {
         "role": "assistant",
-        "content": _read_field(message, "content") or "",
+        "content": (
+            content if content is not None
+            else (_read_field(message, "content") or "")
+        ),
         "tool_calls": _extract_tool_calls(message),
     }
     if finish_reason is not None:
@@ -427,43 +436,99 @@ class LLMTracker:
             content = getattr(msg, "content", None) or ""
             tool_calls = _extract_tool_calls(msg)
             if not (content and str(content).strip()) and not tool_calls:
-                # Carry the diagnostic in the exception message, not just a
-                # log line: callers routinely catch this and re-log only
-                # str(e) (losing the traceback), and the warning below can be
-                # invisible entirely if this logger isn't wired to a handler.
-                # Putting finish_reason inline is what makes the cause
-                # ("length" = output budget exhausted, typically by reasoning
-                # tokens, vs "content_filter" vs provider quirk) visible in
-                # error trackers instead of needing a repro.
                 finish_reason = getattr(choice, "finish_reason", None)
                 reasoning = getattr(msg, "reasoning_content", None)
-                diagnostics = (
-                    f"finish_reason={finish_reason!r} "
-                    f"has_reasoning_content={bool(reasoning)} "
-                    f"reasoning_len={len(reasoning) if reasoning else 0} "
-                    f"model={model}"
+
+                # Observed on deepseek-v4-flash (#223): under forced JSON
+                # mode the model sometimes writes its full, valid answer
+                # into reasoning_content and leaves content empty, then
+                # reports finish_reason='stop' as if nothing were wrong —
+                # a provider-side misrouting, not a truncated or missing
+                # answer. Recover it rather than failing the call, but only
+                # when all three hold:
+                #  - a JSON object was actually requested (outside json_mode
+                #    this field is genuine chain-of-thought prose, not a
+                #    misplaced answer — treating it as one would smuggle
+                #    unvetted text into a caller expecting a real response)
+                #  - finish_reason is 'stop': the model itself claims
+                #    generation completed normally, so whatever it wrote is
+                #    likely whole. finish_reason='length' (#177 — output
+                #    budget exhausted, typically by reasoning tokens) is
+                #    deliberately excluded: json_repair "fixes" a
+                #    mid-generation cutoff by silently closing brackets
+                #    around whatever fields happened to land before the
+                #    cutoff, which can produce a fully-formed-looking
+                #    {"verdict": "passed", "confidence": 0.95, ...} out of
+                #    an answer that never finished — confirmed by hand, not
+                #    hypothetical. That is exactly the failure mode this
+                #    whole module exists to prevent, so a truncated call
+                #    must keep failing closed, never get "repaired" into a
+                #    plausible-looking pass.
+                #  - the reasoning text actually parses as a JSON object
+                json_mode_requested = (
+                    isinstance(params.get("response_format"), dict)
+                    and params["response_format"].get("type") == "json_object"
                 )
-                logger.warning(
-                    f"[{node_name}] LLM returned empty content — {diagnostics}"
-                )
-                # The exception message above only carries reasoning_len —
-                # enough to see THAT it happened, not enough to diagnose
-                # WHY. Stash the raw text into effective_state["metadata"]
-                # so _record_failed_llm_call's _save_usage_to_db call (a few
-                # frames up, in the except block) persists it on the usage
-                # row instead of it being lost with the stack.
-                effective_state.setdefault("metadata", {})[
-                    "empty_response_diagnostics"
-                ] = {
-                    "finish_reason": finish_reason,
-                    "content_repr": repr(content)[:200],
-                    "reasoning_content": (reasoning or "")[
-                        :EMPTY_RESPONSE_REASONING_CAPTURE_CHARS
-                    ],
-                }
-                raise ValueError(
-                    f"LLM returned empty response ({diagnostics})"
-                )
+                if (
+                    json_mode_requested
+                    and finish_reason == "stop"
+                    and reasoning
+                    and str(reasoning).strip()
+                ):
+                    try:
+                        content = _repair_json_obj(reasoning)
+                    except ValueError:
+                        content = ""
+
+                if content and str(content).strip():
+                    logger.warning(
+                        f"[{node_name}] LLM left content empty but wrote a "
+                        f"valid JSON answer into reasoning_content instead "
+                        f"(finish_reason={finish_reason!r} model={model}) — "
+                        f"recovered it rather than failing the call."
+                    )
+                    effective_state.setdefault("metadata", {})[
+                        "recovered_from_reasoning_content"
+                    ] = True
+                else:
+                    # Carry the diagnostic in the exception message, not
+                    # just a log line: callers routinely catch this and
+                    # re-log only str(e) (losing the traceback), and the
+                    # warning below can be invisible entirely if this
+                    # logger isn't wired to a handler. Putting finish_reason
+                    # inline is what makes the cause ("length" = output
+                    # budget exhausted, typically by reasoning tokens, vs
+                    # "content_filter" vs provider quirk) visible in error
+                    # trackers instead of needing a repro.
+                    diagnostics = (
+                        f"finish_reason={finish_reason!r} "
+                        f"has_reasoning_content={bool(reasoning)} "
+                        f"reasoning_len={len(reasoning) if reasoning else 0} "
+                        f"model={model}"
+                    )
+                    logger.warning(
+                        f"[{node_name}] LLM returned empty content — "
+                        f"{diagnostics}"
+                    )
+                    # The exception message above only carries reasoning_len
+                    # — enough to see THAT it happened, not enough to
+                    # diagnose WHY. Stash the raw text into
+                    # effective_state["metadata"] so
+                    # _record_failed_llm_call's _save_usage_to_db call (a
+                    # few frames up, in the except block) persists it on the
+                    # usage row instead of it being lost with the stack.
+                    effective_state.setdefault("metadata", {})[
+                        "empty_response_diagnostics"
+                    ] = {
+                        "finish_reason": finish_reason,
+                        "content_repr": repr(content)[:200],
+                        "reasoning_content": (reasoning or "")[
+                            :EMPTY_RESPONSE_REASONING_CAPTURE_CHARS
+                        ],
+                    }
+                    raise ValueError(
+                        f"LLM returned empty response ({diagnostics})"
+                    )
 
             usage = usage_from_response(response, model)
             usage = fill_usage_with_token_fallback(
@@ -523,6 +588,7 @@ class LLMTracker:
                 return _assistant_message_payload(
                     msg,
                     getattr(choice, "finish_reason", None),
+                    content=content,
                 ), usage
             return str(content), usage
 
