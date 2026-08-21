@@ -220,6 +220,9 @@ def _assistant_message_payload(
         ),
         "tool_calls": _extract_tool_calls(message),
     }
+    reasoning_content = _read_field(message, "reasoning_content")
+    if reasoning_content is not None:
+        payload["reasoning_content"] = reasoning_content
     if finish_reason is not None:
         payload["finish_reason"] = str(finish_reason)
     return payload

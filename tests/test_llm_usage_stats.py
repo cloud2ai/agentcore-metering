@@ -103,6 +103,39 @@ class TestGetSummaryStats:
         assert out["total_calls"] == 1
         assert out["total_tokens"] == 30
 
+    def test_distinguishes_unpriced_calls_from_real_zero_cost(self):
+        LLMUsage.objects.create(
+            model="priced-free",
+            total_tokens=10,
+            cost=0,
+        )
+        LLMUsage.objects.create(
+            model="missing-price",
+            total_tokens=20,
+            cost=None,
+        )
+
+        out = get_summary_stats()
+
+        assert out["total_cost"] == 0
+        assert out["priced_calls"] == 1
+        assert out["unpriced_calls"] == 1
+        assert out["cost_status"] == "partial"
+
+    def test_reports_unavailable_cost_when_every_call_is_unpriced(self):
+        LLMUsage.objects.create(
+            model="missing-price",
+            total_tokens=20,
+            cost=None,
+        )
+
+        out = get_summary_stats()
+
+        assert out["total_cost"] == 0
+        assert out["priced_calls"] == 0
+        assert out["unpriced_calls"] == 1
+        assert out["cost_status"] == "unavailable"
+
 
 @pytest.mark.unit
 @pytest.mark.django_db
@@ -119,6 +152,18 @@ class TestGetStatsByModel:
         by_model = {r["model"]: r for r in rows}
         assert by_model["gpt-4"]["total_calls"] == 2
         assert by_model["gpt-4"]["total_tokens"] == 18
+
+    def test_reports_cost_coverage_for_each_model(self):
+        LLMUsage.objects.create(model="free", total_tokens=1, cost=0)
+        LLMUsage.objects.create(model="unknown", total_tokens=1, cost=None)
+
+        out = get_token_stats_from_query({})
+        by_model = {row["model"]: row for row in out["by_model"]}
+
+        assert by_model["free"]["cost_status"] == "priced"
+        assert by_model["free"]["priced_calls"] == 1
+        assert by_model["unknown"]["cost_status"] == "unavailable"
+        assert by_model["unknown"]["unpriced_calls"] == 1
 
 
 @pytest.mark.unit

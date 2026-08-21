@@ -14,6 +14,18 @@ from django.utils import timezone
 from agentcore_metering.adapters.django.models import LLMUsage
 
 
+def _cost_status(priced_calls: int, unpriced_calls: int) -> str:
+    """Describe whether aggregate cost data is complete and meaningful."""
+
+    if priced_calls == 0 and unpriced_calls == 0:
+        return "empty"
+    if priced_calls == 0:
+        return "unavailable"
+    if unpriced_calls > 0:
+        return "partial"
+    return "priced"
+
+
 def _parse_date(value: Optional[str]) -> Optional[datetime]:
     if not value:
         return None
@@ -107,7 +119,7 @@ def get_summary_stats(start_date=None, end_date=None, user_id=None):
 
     Optional filters: start_date, end_date (timezone-aware), user_id.
     Returns dict with total_* tokens, total_calls, successful_calls,
-    failed_calls, total_cost, total_cost_currency.
+    failed_calls, total_cost, cost coverage, and total_cost_currency.
     """
     qs = LLMUsage.objects.all()
     if user_id:
@@ -124,6 +136,8 @@ def get_summary_stats(start_date=None, end_date=None, user_id=None):
         total_cached_tokens=Sum("cached_tokens"),
         total_reasoning_tokens=Sum("reasoning_tokens"),
         total_cost=Sum("cost"),
+        priced_calls=Count("id", filter=Q(cost__isnull=False)),
+        unpriced_calls=Count("id", filter=Q(cost__isnull=True)),
         successful_calls=Count("id", filter=Q(success=True)),
         failed_calls=Count("id", filter=Q(success=False)),
     )
@@ -132,6 +146,8 @@ def get_summary_stats(start_date=None, end_date=None, user_id=None):
         total_cost = float(total_cost)
     else:
         total_cost = 0
+    priced_calls = agg["priced_calls"] or 0
+    unpriced_calls = agg["unpriced_calls"] or 0
     return {
         "total_prompt_tokens": agg["total_prompt_tokens"] or 0,
         "total_completion_tokens": agg["total_completion_tokens"] or 0,
@@ -140,6 +156,9 @@ def get_summary_stats(start_date=None, end_date=None, user_id=None):
         "total_reasoning_tokens": agg["total_reasoning_tokens"] or 0,
         "total_cost": total_cost,
         "total_cost_currency": "USD",
+        "priced_calls": priced_calls,
+        "unpriced_calls": unpriced_calls,
+        "cost_status": _cost_status(priced_calls, unpriced_calls),
         "total_calls": agg["total_calls"] or 0,
         "successful_calls": agg["successful_calls"] or 0,
         "failed_calls": agg["failed_calls"] or 0,
@@ -161,6 +180,8 @@ def get_stats_by_model(start_date=None, end_date=None, user_id=None):
         total_cached_tokens=Sum("cached_tokens"),
         total_reasoning_tokens=Sum("reasoning_tokens"),
         total_cost=Sum("cost"),
+        priced_calls=Count("id", filter=Q(cost__isnull=False)),
+        unpriced_calls=Count("id", filter=Q(cost__isnull=True)),
     ).order_by("-total_tokens")
     if user_id:
         qs = qs.filter(user_id=user_id)
@@ -366,6 +387,10 @@ def get_token_stats_from_query(params: Any) -> dict:
         cost = i.get("total_cost")
         i["total_cost"] = float(cost) if cost is not None else 0
         i["total_cost_currency"] = "USD"
+        i["cost_status"] = _cost_status(
+            i["priced_calls"],
+            i["unpriced_calls"],
+        )
     series = None
     expected_buckets = None
     if granularity and start_date and end_date:

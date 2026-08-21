@@ -149,6 +149,16 @@ class TokenStatsSummarySerializer(serializers.Serializer):
     total_cost_currency = serializers.CharField(
         help_text="Currency code (e.g. USD)",
     )
+    priced_calls = serializers.IntegerField(
+        help_text="Calls with an explicit cost value, including zero",
+    )
+    unpriced_calls = serializers.IntegerField(
+        help_text="Calls whose cost could not be determined",
+    )
+    cost_status = serializers.ChoiceField(
+        choices=["empty", "unavailable", "partial", "priced"],
+        help_text="Cost coverage state for the aggregate",
+    )
     total_calls = serializers.IntegerField(
         help_text="Total number of LLM calls",
     )
@@ -170,6 +180,11 @@ class TokenStatsByModelItemSerializer(serializers.Serializer):
     total_reasoning_tokens = serializers.IntegerField()
     total_cost = serializers.FloatField()
     total_cost_currency = serializers.CharField()
+    priced_calls = serializers.IntegerField()
+    unpriced_calls = serializers.IntegerField()
+    cost_status = serializers.ChoiceField(
+        choices=["empty", "unavailable", "partial", "priced"],
+    )
 
 
 class TokenStatsSeriesItemSerializer(serializers.Serializer):
