@@ -416,8 +416,48 @@ class LLMTracker:
         import litellm
         from litellm import APIError, AuthenticationError, RateLimitError
         request_started_at = timezone.now()
+
+        def _record_retried_attempt(exc: Exception, attempt_number: int) -> None:
+            # Written to LLMUsage (not just logged): billing reconciliation
+            # needs every provider-side request counted, and the provider
+            # may have already fully generated (and billed for) this
+            # attempt even though this process never saw the response —
+            # without a row here, a later successful retry leaves that
+            # attempt with zero trace anywhere (confirmed live: 10 DeepSeek
+            # requests billed on 2026-08-20 with no matching row in
+            # llm_tracker_usage). metadata["retry_attempt"]=True marks this
+            # row as an intermediate attempt rather than a terminal
+            # outcome, so it stays distinguishable from a genuine failure
+            # (e.g. via .exclude(metadata__retry_attempt=True)) for callers
+            # that want "logical call" counts instead of "provider request"
+            # counts. Uses an isolated copy of effective_state so this
+            # doesn't leak into the final record's metadata below.
+            retry_state = dict(effective_state)
+            retry_state["metadata"] = {
+                **(effective_state.get("metadata") or {}),
+                "retry_attempt": True,
+                "attempt_number": attempt_number + 1,
+            }
+            _record_failed_llm_call(
+                effective_state=retry_state,
+                state=state,
+                request_started_at=timezone.now(),
+                node_name=node_name,
+                is_streaming=False,
+                error_msg=(
+                    f"attempt {attempt_number + 1} failed with "
+                    f"{type(exc).__name__}: {exc} — retrying "
+                    f"(a later attempt may still succeed; this attempt "
+                    f"may already have been billed by the provider)"
+                ),
+            )
+
         try:
-            response = completion_with_retry(litellm.completion, params)
+            response = completion_with_retry(
+                litellm.completion,
+                params,
+                on_attempt_error=_record_retried_attempt,
+            )
 
             if response is None:
                 logger.error(f"LiteLLM returned None; node_name={node_name}")
@@ -772,6 +812,36 @@ class LLMTracker:
         def _has_emitted() -> bool:
             return first_chunk_at is not None
 
+        def _record_retried_attempt(exc: Exception, attempt_number: int) -> None:
+            # Written to LLMUsage — see the matching closure in
+            # _call_and_track_non_stream_once for the full rationale
+            # (billing reconciliation needs every provider-side request
+            # counted; metadata["retry_attempt"]=True keeps it
+            # distinguishable from a terminal failure). Only reachable
+            # here when has_emitted() was False, i.e. no chunk reached the
+            # caller, but the provider may still have begun (and billed
+            # for) generating a response before this attempt failed
+            # client-side.
+            retry_state = dict(effective_state)
+            retry_state["metadata"] = {
+                **(effective_state.get("metadata") or {}),
+                "retry_attempt": True,
+                "attempt_number": attempt_number + 1,
+            }
+            _record_failed_llm_call(
+                effective_state=retry_state,
+                state=state,
+                request_started_at=timezone.now(),
+                node_name=node_name,
+                is_streaming=True,
+                error_msg=(
+                    f"attempt {attempt_number + 1} failed with "
+                    f"{type(exc).__name__}: {exc} — retrying "
+                    f"(a later attempt may still succeed; this attempt "
+                    f"may already have been billed by the provider)"
+                ),
+            )
+
         def _extract_text(value: Any) -> str:
             """
             Central place to adapt provider-specific stream chunk formats.
@@ -943,6 +1013,7 @@ class LLMTracker:
                 stream_params,
                 has_emitted=_has_emitted,
                 on_retry=_reset_stream_attempt,
+                on_attempt_error=_record_retried_attempt,
             ):
                 last_chunk = chunk
                 choices = getattr(chunk, "choices", None) or []
