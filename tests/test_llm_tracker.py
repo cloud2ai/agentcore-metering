@@ -1180,9 +1180,63 @@ class TestCallAndTrackProviderRetries:
         assert content == "ok"
         assert usage["total_tokens"] == 2
         assert mock_completion.call_count == 2
-        assert mock_save_usage.call_count == 1
-        assert len(state["llm_calls"]) == 1
-        assert state["llm_calls"][0]["success"] is True
+        # One row for the failed-but-retried first attempt (it may have
+        # already been billed by the provider even though this process
+        # never saw a response) plus one for the eventual success — every
+        # provider-side request gets a row so billing reconciliation can
+        # COUNT(*) and match the provider's bill, not just the final
+        # outcome. See completion_with_retry's on_attempt_error.
+        assert mock_save_usage.call_count == 2
+        assert len(state["llm_calls"]) == 2
+        assert state["llm_calls"][0]["success"] is False
+        assert state["llm_calls"][1]["success"] is True
+
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.LLMTracker"
+        "._save_usage_to_db"
+    )
+    @patch("litellm.completion")
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.get_litellm_params"
+    )
+    @patch(
+        "agentcore_metering.adapters.django.services.litellm_retry.time.sleep"
+    )
+    def test_non_stream_retry_marks_attempt_row_without_leaking_metadata(
+        self, mock_sleep, mock_params, mock_completion, mock_save_usage,
+    ):
+        """The retried-attempt row is tagged metadata["retry_attempt"]=True
+        so it stays distinguishable from a genuine terminal failure (e.g.
+        via .exclude(metadata__retry_attempt=True) for callers that want
+        "logical call" counts instead of "provider request" counts) — and
+        that tag must not leak into the final (successful) record, since
+        both share the same effective_state object."""
+        mock_params.return_value = {
+            "model": "gpt-4",
+            "api_key": "sk-x",
+            "timeout": 30,
+            "num_retries": 2,
+        }
+        mock_completion.side_effect = [
+            self.TransientProviderError("busy"),
+            self._response(),
+        ]
+
+        content, _usage = LLMTracker.call_and_track(
+            messages=[{"role": "user", "content": "hi"}],
+        )
+
+        assert content == "ok"
+        assert mock_save_usage.call_count == 2
+        retry_call, final_call = mock_save_usage.call_args_list
+        assert retry_call.kwargs["success"] is False
+        assert (
+            retry_call.kwargs["state"]["metadata"]["retry_attempt"] is True
+        )
+        assert final_call.kwargs["success"] is True
+        assert "retry_attempt" not in (
+            final_call.kwargs["state"].get("metadata") or {}
+        )
 
     @patch(
         "agentcore_metering.adapters.django.trackers.llm.LLMTracker"
@@ -1222,7 +1276,10 @@ class TestCallAndTrackProviderRetries:
 
         assert content == "second call succeeded"
         assert mock_completion.call_count == 4
-        assert mock_save_usage.call_count == 2
+        # First call_and_track(): 1 retried-attempt row + 1 terminal-
+        # failure row. Second: 1 retried-attempt row + 1 success row.
+        # See on_attempt_error in completion_with_retry.
+        assert mock_save_usage.call_count == 4
 
     @patch(
         "agentcore_metering.adapters.django.trackers.llm.LLMTracker"
@@ -1274,7 +1331,11 @@ class TestCallAndTrackProviderRetries:
 
         assert chunks == [("content", "recovered")]
         assert mock_completion.call_count == 2
-        assert mock_save_usage.call_count == 1
+        # One row for the failed-before-first-chunk retried attempt, one
+        # for the eventual success. See on_attempt_error in
+        # iter_completion_with_retry.
+        assert mock_save_usage.call_count == 2
+        assert mock_save_usage.call_args_list[0].kwargs["success"] is False
         assert mock_save_usage.call_args.kwargs["success"] is True
 
     @patch(

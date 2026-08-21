@@ -197,9 +197,25 @@ def _wait_for_retry(
 
 
 def completion_with_retry(
-    completion: Callable[..., Any], params: Dict[str, Any]
+    completion: Callable[..., Any],
+    params: Dict[str, Any],
+    *,
+    on_attempt_error: Optional[Callable[[Exception, int], None]] = None,
 ) -> Any:
-    """Call a non-streaming LiteLLM completion within one timeout budget."""
+    """Call a non-streaming LiteLLM completion within one timeout budget.
+
+    on_attempt_error, if given, fires once per attempt that fails but is
+    about to be retried (never for the final attempt that raises out —
+    callers already observe that via the exception itself). A failed
+    attempt may still have reached the provider and been billed even
+    though this process never saw a response for it; without this hook,
+    a call that ultimately succeeds on a later attempt leaves zero trace
+    of the earlier billed-but-lost attempt anywhere (confirmed live:
+    10 DeepSeek requests billed on 2026-08-20 with no matching row —
+    success or failure — in llm_tracker_usage). Exceptions raised by the
+    callback itself are logged and swallowed, never allowed to break an
+    otherwise-successful retry.
+    """
     retries = _configured_retries(params)
     deadline = _deadline(params)
     for attempt_number in range(retries + 1):
@@ -207,17 +223,25 @@ def completion_with_retry(
         try:
             return completion(**_attempt_params(params, remaining))
         except Exception as exc:
-            if (
-                attempt_number >= retries
-                or not is_retryable_exception(exc)
-                or not _wait_for_retry(
+            will_retry = (
+                attempt_number < retries
+                and is_retryable_exception(exc)
+                and _wait_for_retry(
                     exc,
                     attempt_number,
                     deadline,
                     params,
                 )
-            ):
+            )
+            if not will_retry:
                 raise
+            if on_attempt_error is not None:
+                try:
+                    on_attempt_error(exc, attempt_number)
+                except Exception:
+                    logger.exception(
+                        "on_attempt_error callback failed; continuing retry"
+                    )
     raise RuntimeError("unreachable retry state")
 
 
@@ -227,8 +251,15 @@ def iter_completion_with_retry(
     *,
     has_emitted: Callable[[], bool],
     on_retry: Optional[Callable[[], None]] = None,
+    on_attempt_error: Optional[Callable[[Exception, int], None]] = None,
 ) -> Generator[Any, None, None]:
-    """Yield stream chunks, replaying only before caller-visible output."""
+    """Yield stream chunks, replaying only before caller-visible output.
+
+    on_attempt_error: see completion_with_retry — same billed-but-lost-
+    attempt audit trail hook, fired once per retried attempt. Distinct
+    from on_retry (which resets caller-side stream-accumulation state);
+    both fire together when an attempt is retried.
+    """
     retries = _configured_retries(params)
     deadline = _deadline(params)
     for attempt_number in range(retries + 1):
@@ -238,17 +269,25 @@ def iter_completion_with_retry(
             yield from response
             return
         except Exception as exc:
-            if (
-                has_emitted()
-                or attempt_number >= retries
-                or not is_retryable_exception(exc)
-                or not _wait_for_retry(
+            will_retry = (
+                not has_emitted()
+                and attempt_number < retries
+                and is_retryable_exception(exc)
+                and _wait_for_retry(
                     exc,
                     attempt_number,
                     deadline,
                     params,
                 )
-            ):
+            )
+            if not will_retry:
                 raise
+            if on_attempt_error is not None:
+                try:
+                    on_attempt_error(exc, attempt_number)
+                except Exception:
+                    logger.exception(
+                        "on_attempt_error callback failed; continuing retry"
+                    )
             if on_retry is not None:
                 on_retry()
