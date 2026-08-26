@@ -373,16 +373,22 @@ class LLMTracker:
         total_attempts = max_json_attempts
         last_error: Optional[ValueError] = None
         for attempt_idx in range(total_attempts):
-            content, usage = LLMTracker._call_and_track_non_stream_once(
-                params=params,
-                effective_state=effective_state,
-                node_name=node_name,
-                state=state,
-                model=model,
-                return_message=False,
-                friendly_errors=friendly_errors,
-            )
+            # _call_and_track_non_stream_once is INSIDE this try, not just
+            # _repair_json_obj: a "LLM returned empty response" ValueError
+            # (issue #177) used to propagate straight out of this loop on
+            # attempt 1, bypassing json_attempts entirely — the retry
+            # budget only ever covered a bad-JSON response that DID have
+            # content, never a call that produced none at all.
             try:
+                content, usage = LLMTracker._call_and_track_non_stream_once(
+                    params=params,
+                    effective_state=effective_state,
+                    node_name=node_name,
+                    state=state,
+                    model=model,
+                    return_message=False,
+                    friendly_errors=friendly_errors,
+                )
                 repaired_content = _repair_json_obj(content)
                 return repaired_content, usage
             except ValueError as e:
@@ -393,7 +399,7 @@ class LLMTracker:
                     2**attempt_idx
                 )
                 logger.warning(
-                    f"JSON parse validation failed "
+                    f"LLM call/JSON validation failed "
                     f"(attempt {attempt_idx + 1}/{total_attempts}) "
                     f"node_name={node_name}: {e}. "
                     f"Retrying in {delay_seconds:.1f}s"
@@ -401,8 +407,8 @@ class LLMTracker:
                 time.sleep(delay_seconds)
 
         raise ValueError(
-            f"[{node_name}] Invalid JSON response after {total_attempts} "
-            f"attempts: {last_error}"
+            f"[{node_name}] LLM call/JSON validation failed after "
+            f"{total_attempts} attempts: {last_error}"
         )
 
     @staticmethod

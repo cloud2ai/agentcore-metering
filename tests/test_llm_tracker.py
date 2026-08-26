@@ -767,16 +767,14 @@ class TestCallAndTrackJsonRepairRetry:
         "agentcore_metering.adapters.django.trackers.llm.LLMTracker"
         "._save_usage_to_db"
     )
-    @patch(
-        "agentcore_metering.adapters.django.trackers.llm.litellm"
-    )
+    @patch("litellm.completion")
     @patch(
         "agentcore_metering.adapters.django.trackers.llm.get_litellm_params"
     )
     def test_json_mode_retries_and_succeeds(
         self,
         mock_params,
-        mock_litellm,
+        mock_completion,
         mock_save_usage,
         mock_now,
         mock_sleep,
@@ -808,7 +806,7 @@ class TestCallAndTrackJsonRepairRetry:
             model="gpt-4",
             _hidden_params={},
         )
-        mock_litellm.completion.side_effect = [response_bad, response_ok]
+        mock_completion.side_effect = [response_bad, response_ok]
 
         content, _usage = LLMTracker.call_and_track(
             messages=[{"role": "user", "content": "hi"}],
@@ -816,7 +814,7 @@ class TestCallAndTrackJsonRepairRetry:
         )
 
         assert '"cleaned_content"' in content
-        assert mock_litellm.completion.call_count == 2
+        assert mock_completion.call_count == 2
         assert mock_save_usage.call_count == 2
         mock_sleep.assert_called_once_with(0.5)
         first_started_at = mock_save_usage.call_args_list[0].kwargs[
@@ -834,16 +832,14 @@ class TestCallAndTrackJsonRepairRetry:
         "agentcore_metering.adapters.django.trackers.llm.LLMTracker"
         "._save_usage_to_db"
     )
-    @patch(
-        "agentcore_metering.adapters.django.trackers.llm.litellm"
-    )
+    @patch("litellm.completion")
     @patch(
         "agentcore_metering.adapters.django.trackers.llm.get_litellm_params"
     )
     def test_json_mode_raises_after_retry_exhausted(
         self,
         mock_params,
-        mock_litellm,
+        mock_completion,
         mock_save_usage,
         mock_sleep,
     ):
@@ -860,7 +856,7 @@ class TestCallAndTrackJsonRepairRetry:
             model="gpt-4",
             _hidden_params={},
         )
-        mock_litellm.completion.side_effect = [
+        mock_completion.side_effect = [
             response_bad,
             response_bad,
             response_bad,
@@ -871,8 +867,112 @@ class TestCallAndTrackJsonRepairRetry:
                 messages=[{"role": "user", "content": "hi"}],
                 json_mode=True,
             )
-        assert "Invalid JSON response after 3 attempts" in str(exc_info.value)
-        assert mock_litellm.completion.call_count == 3
+        assert (
+            "LLM call/JSON validation failed after 3 attempts"
+            in str(exc_info.value)
+        )
+        assert mock_completion.call_count == 3
+        assert mock_save_usage.call_count == 3
+        assert mock_sleep.call_count == 2
+
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.time.sleep"
+    )
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.LLMTracker"
+        "._save_usage_to_db"
+    )
+    @patch("litellm.completion")
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.get_litellm_params"
+    )
+    def test_empty_response_is_retried_by_json_attempts(
+        self,
+        mock_params,
+        mock_completion,
+        mock_save_usage,
+        mock_sleep,
+    ):
+        """#177: an empty-response ValueError used to propagate straight
+        out of the json_attempts loop on attempt 1 — the retry budget
+        only ever covered bad-JSON-but-present content, never a call
+        that produced no content at all. It must now retry the same as
+        a JSON-repair failure does."""
+        mock_params.return_value = {"model": "gpt-4", "api_key": "sk-x"}
+        usage = SimpleNamespace(
+            prompt_tokens=10, completion_tokens=0, total_tokens=10,
+        )
+        empty_msg = SimpleNamespace(content="")
+        empty_choice = SimpleNamespace(
+            message=empty_msg, finish_reason="stop",
+        )
+        response_empty = SimpleNamespace(
+            choices=[empty_choice], usage=usage, model="gpt-4",
+            _hidden_params={},
+        )
+        ok_msg = SimpleNamespace(content='{"cleaned_content":"ok"}')
+        ok_choice = SimpleNamespace(message=ok_msg, finish_reason="stop")
+        response_ok = SimpleNamespace(
+            choices=[ok_choice], usage=usage, model="gpt-4",
+            _hidden_params={},
+        )
+        mock_completion.side_effect = [response_empty, response_ok]
+
+        content, _usage = LLMTracker.call_and_track(
+            messages=[{"role": "user", "content": "hi"}],
+            json_mode=True,
+        )
+
+        assert '"cleaned_content"' in content
+        assert mock_completion.call_count == 2
+        assert mock_save_usage.call_count == 2
+        mock_sleep.assert_called_once_with(0.5)
+
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.time.sleep"
+    )
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.LLMTracker"
+        "._save_usage_to_db"
+    )
+    @patch("litellm.completion")
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.get_litellm_params"
+    )
+    def test_empty_response_raises_after_retry_exhausted(
+        self,
+        mock_params,
+        mock_completion,
+        mock_save_usage,
+        mock_sleep,
+    ):
+        mock_params.return_value = {"model": "gpt-4", "api_key": "sk-x"}
+        usage = SimpleNamespace(
+            prompt_tokens=10, completion_tokens=0, total_tokens=10,
+        )
+        empty_msg = SimpleNamespace(content="")
+        empty_choice = SimpleNamespace(
+            message=empty_msg, finish_reason="stop",
+        )
+        response_empty = SimpleNamespace(
+            choices=[empty_choice], usage=usage, model="gpt-4",
+            _hidden_params={},
+        )
+        mock_completion.side_effect = [
+            response_empty, response_empty, response_empty,
+        ]
+
+        with pytest.raises(ValueError) as exc_info:
+            LLMTracker.call_and_track(
+                messages=[{"role": "user", "content": "hi"}],
+                json_mode=True,
+            )
+        assert (
+            "LLM call/JSON validation failed after 3 attempts"
+            in str(exc_info.value)
+        )
+        assert "empty" in str(exc_info.value).lower()
+        assert mock_completion.call_count == 3
         assert mock_save_usage.call_count == 3
         assert mock_sleep.call_count == 2
 
