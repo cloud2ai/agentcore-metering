@@ -404,8 +404,8 @@ class LLMTracker:
                 time.sleep(delay_seconds)
 
         raise ValueError(
-            f"[{node_name}] Invalid JSON response after {total_attempts} "
-            f"attempts: {last_error}"
+            f"[{node_name}] LLM call/JSON validation failed after "
+            f"{total_attempts} attempts: {last_error}"
         )
 
     @staticmethod

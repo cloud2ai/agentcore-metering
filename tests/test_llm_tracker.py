@@ -851,7 +851,10 @@ class TestCallAndTrackJsonRepairRetry:
                 messages=[{"role": "user", "content": "hi"}],
                 json_mode=True,
             )
-        assert "Invalid JSON response after 3 attempts" in str(exc_info.value)
+        assert (
+            "LLM call/JSON validation failed after 3 attempts"
+            in str(exc_info.value)
+        )
         assert mock_completion.call_count == 3
         assert mock_save_usage.call_count == 3
         assert mock_sleep.call_count == 2
@@ -948,7 +951,10 @@ class TestCallAndTrackJsonRepairRetry:
                 messages=[{"role": "user", "content": "hi"}],
                 json_mode=True,
             )
-        assert "Invalid JSON response after 3 attempts" in str(exc_info.value)
+        assert (
+            "LLM call/JSON validation failed after 3 attempts"
+            in str(exc_info.value)
+        )
         assert "empty" in str(exc_info.value).lower()
         assert mock_completion.call_count == 3
         assert mock_save_usage.call_count == 3
