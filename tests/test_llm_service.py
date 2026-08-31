@@ -8,6 +8,9 @@ import pytest
 
 from agentcore_metering.adapters.django.models import LLMConfig
 from agentcore_metering.adapters.django.services import get_litellm_params
+from agentcore_metering.adapters.django.services.litellm_params import (
+    apply_reasoning_effort,
+)
 
 
 @pytest.mark.unit
@@ -88,3 +91,51 @@ class TestGetLlmServiceGemini:
             get_litellm_params()
         assert "Gemini" in str(exc_info.value)
         assert "incomplete" in str(exc_info.value).lower()
+
+
+@pytest.mark.unit
+class TestApplyReasoningEffort:
+    """
+    LiteLLM's DeepSeek mapping can turn thinking on but never off --
+    reasoning_effort="none" is dropped, leaving DeepSeek's default (on) in
+    place. These pin that "none" now actually disables it, and that nothing
+    else changes shape.
+    """
+
+    def test_none_effort_disables_thinking_for_deepseek(self):
+        params = {"model": "deepseek/deepseek-chat"}
+        apply_reasoning_effort(params, "none")
+        assert params["reasoning_effort"] == "none"
+        assert params["extra_body"] == {"thinking": {"type": "disabled"}}
+
+    def test_other_efforts_do_not_add_a_body(self):
+        params = {"model": "deepseek/deepseek-chat"}
+        apply_reasoning_effort(params, "high")
+        assert params["reasoning_effort"] == "high"
+        assert "extra_body" not in params
+
+    def test_absent_effort_is_a_no_op(self):
+        params = {"model": "deepseek/deepseek-chat"}
+        apply_reasoning_effort(params, None)
+        assert params == {"model": "deepseek/deepseek-chat"}
+
+    def test_openai_compatible_gateway_serving_deepseek_is_left_alone(self):
+        params = {"model": "openai/deepseek/DeepSeek-V4-Flash/8f94e"}
+        apply_reasoning_effort(params, "none")
+        assert "extra_body" not in params
+
+    def test_other_providers_are_left_alone(self):
+        params = {"model": "gpt-4o-mini"}
+        apply_reasoning_effort(params, "none")
+        assert "extra_body" not in params
+
+    def test_existing_extra_body_is_preserved_and_not_overridden(self):
+        params = {
+            "model": "deepseek/deepseek-chat",
+            "extra_body": {"thinking": {"type": "enabled"}, "foo": 1},
+        }
+        apply_reasoning_effort(params, "none")
+        assert params["extra_body"] == {
+            "thinking": {"type": "enabled"},
+            "foo": 1,
+        }

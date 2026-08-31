@@ -171,6 +171,46 @@ def _litellm_kwargs_from_config(provider: str, config: dict) -> Dict[str, Any]:
     return {k: v for k, v in kwargs.items() if v is not None}
 
 
+# LiteLLM's DeepSeekChatConfig maps both `reasoning_effort` and `thinking`
+# to {"type": "enabled"} and nothing else: it can turn thinking on, never
+# off. reasoning_effort="none" hits its `!= "none"` guard and is simply
+# dropped, which leaves DeepSeek's own default -- thinking on, at high
+# effort -- in place, so a caller asking for no reasoning silently got it
+# anyway. DeepSeek accepts {"thinking": {"type": "disabled"}} in the request
+# body, so "none" is honoured here instead.
+#
+# Matched on LiteLLM's provider prefix rather than on "deepseek" appearing
+# anywhere in the model string: an OpenAI-compatible gateway that happens to
+# serve a DeepSeek model ("openai/deepseek/...") is deliberately left alone,
+# since whether it forwards a vendor field is the gateway's business.
+_NON_THINKING_REASONING_EFFORT = "none"
+_DEEPSEEK_MODEL_PREFIX = "deepseek/"
+
+
+def apply_reasoning_effort(
+    params: Dict[str, Any], reasoning_effort: Optional[str]
+) -> None:
+    """
+    Set `reasoning_effort` on litellm kwargs, in place.
+
+    Adds the provider-specific body a "none" effort needs when LiteLLM's own
+    mapping cannot express it. No-op when reasoning_effort is None, so every
+    existing call path is unchanged.
+    """
+    if reasoning_effort is None:
+        return
+    params["reasoning_effort"] = reasoning_effort
+    if reasoning_effort != _NON_THINKING_REASONING_EFFORT:
+        return
+    model = str(params.get("model") or "")
+    if not model.startswith(_DEEPSEEK_MODEL_PREFIX):
+        return
+    extra_body = dict(params.get("extra_body") or {})
+    # setdefault: an explicit thinking directive already on the request wins.
+    extra_body.setdefault("thinking", {"type": "disabled"})
+    params["extra_body"] = extra_body
+
+
 def _validate_config(provider: str, config: dict) -> None:
     """Raise ValueError if required keys are missing for the provider."""
     provider = (provider or "openai").strip().lower()
