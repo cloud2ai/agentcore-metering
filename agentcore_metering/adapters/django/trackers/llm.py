@@ -19,6 +19,9 @@ from django.utils import timezone
 from json_repair import repair_json
 
 from agentcore_metering.adapters.django.models import LLMUsage
+from agentcore_metering.adapters.django.services.litellm_params import (
+    apply_reasoning_effort,
+)
 from agentcore_metering.adapters.django.services.runtime_config import (
     get_litellm_params,
 )
@@ -287,8 +290,7 @@ class LLMTracker:
             params["temperature"] = temperature
         if top_p is not None:
             params["top_p"] = top_p
-        if reasoning_effort is not None:
-            params["reasoning_effort"] = reasoning_effort
+        apply_reasoning_effort(params, reasoning_effort)
         if tools is not None:
             params["tools"] = tools
         if tool_choice is not None:
