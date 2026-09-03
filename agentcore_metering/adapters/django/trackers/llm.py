@@ -684,8 +684,9 @@ class LLMTracker:
     ) -> Generator[tuple, None, Dict[str, Any]]:
         """
         Streaming branch: litellm.completion(stream=True), yield (kind, text)
-        with kind "reasoning" or "content". first_chunk_at on first non-empty
-        chunk, usage from last chunk, then _save_usage_to_db.
+        with kind "reasoning", "content", or "tool_call". first_chunk_at on
+        the first non-empty chunk, usage from last chunk, then
+        _save_usage_to_db.
         Returns usage as generator return value (StopIteration.value).
         """
         import litellm
@@ -931,9 +932,15 @@ class LLMTracker:
                                 "type": "function",
                                 "function": {"name": "", "arguments": ""},
                             }
+                        accumulated = accumulated_tool_calls[idx]
+                        before = (
+                            accumulated["id"],
+                            accumulated["function"]["name"],
+                            accumulated["function"]["arguments"],
+                        )
                         tc_id = _read_chunk_field(tc, "id")
                         if tc_id:
-                            accumulated_tool_calls[idx]["id"] = tc_id
+                            accumulated["id"] = tc_id
                         tc_func = _read_chunk_field(tc, "function")
                         if tc_func:
                             tc_name = _read_chunk_field(tc_func, "name") or ""
@@ -941,13 +948,38 @@ class LLMTracker:
                                 _read_chunk_field(tc_func, "arguments") or ""
                             )
                             if tc_name:
-                                accumulated_tool_calls[idx][
-                                    "function"
-                                ]["name"] += tc_name
+                                accumulated["function"]["name"] += tc_name
                             if tc_args:
-                                accumulated_tool_calls[idx][
-                                    "function"
-                                ]["arguments"] += tc_args
+                                accumulated["function"][
+                                    "arguments"
+                                ] += tc_args
+                        after = (
+                            accumulated["id"],
+                            accumulated["function"]["name"],
+                            accumulated["function"]["arguments"],
+                        )
+                        if after != before:
+                            if first_chunk_at is None:
+                                first_chunk_at = timezone.now()
+                            event = {
+                                "index": idx,
+                                "id": accumulated["id"],
+                                "name": accumulated["function"]["name"],
+                                "arguments": accumulated["function"][
+                                    "arguments"
+                                ],
+                            }
+                            try:
+                                yield (
+                                    "tool_call",
+                                    json.dumps(
+                                        event,
+                                        ensure_ascii=False,
+                                        separators=(",", ":"),
+                                    ),
+                                )
+                            except GeneratorExit:
+                                _handle_stream_stop()
                 content = _read_chunk_field(delta, "content")
                 if content is not None:
                     # Preserve whitespace verbatim. Stream chunks carry

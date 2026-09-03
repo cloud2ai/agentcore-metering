@@ -1,6 +1,8 @@
 """
 Tests for trackers.llm.LLMTracker (LiteLLM): call_and_track exception paths.
 """
+import json
+import sys
 from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -729,6 +731,109 @@ class TestCallAndTrackStreaming:
         save_kwargs = mock_save_usage.call_args.kwargs
         assert save_kwargs["is_streaming"] is True
         assert save_kwargs.get("first_chunk_at") is not None
+
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.LLMTracker"
+        "._save_usage_to_db"
+    )
+    @patch(
+        "agentcore_metering.adapters.django.trackers.llm.get_litellm_params"
+    )
+    def test_stream_yields_cumulative_tool_call_deltas(
+        self, mock_params, _mock_save_usage, monkeypatch
+    ):
+        mock_params.return_value = {"model": "gpt-4", "api_key": "sk-x"}
+        chunks = [
+            SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        delta=SimpleNamespace(
+                            tool_calls=[
+                                SimpleNamespace(
+                                    index=0,
+                                    id="call-plan",
+                                    function=SimpleNamespace(
+                                        name="write_todos",
+                                        arguments=(
+                                            '{"todos":['
+                                            '{"content":"Inspect",'
+                                        ),
+                                    ),
+                                )
+                            ]
+                        )
+                    )
+                ],
+                usage=None,
+                model="gpt-4",
+            ),
+            SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        delta=SimpleNamespace(
+                            tool_calls=[
+                                SimpleNamespace(
+                                    index=0,
+                                    function=SimpleNamespace(
+                                        arguments=(
+                                            '"status":"in_progress"}]}'
+                                        ),
+                                    ),
+                                )
+                            ]
+                        ),
+                        finish_reason="tool_calls",
+                    )
+                ],
+                usage=SimpleNamespace(
+                    prompt_tokens=1,
+                    completion_tokens=2,
+                    total_tokens=3,
+                ),
+                model="gpt-4",
+            ),
+        ]
+        fake_litellm = SimpleNamespace(
+            APIError=type("APIError", (Exception,), {}),
+            AuthenticationError=type(
+                "AuthenticationError",
+                (Exception,),
+                {},
+            ),
+            RateLimitError=type("RateLimitError", (Exception,), {}),
+            completion=MagicMock(return_value=iter(chunks)),
+        )
+        monkeypatch.setitem(sys.modules, "litellm", fake_litellm)
+
+        events = list(
+            LLMTracker.call_and_track(
+                messages=[{"role": "user", "content": "plan"}],
+                stream=True,
+            )
+        )
+
+        tool_events = [
+            json.loads(content)
+            for kind, content in events
+            if kind == "tool_call"
+        ]
+        assert tool_events == [
+            {
+                "index": 0,
+                "id": "call-plan",
+                "name": "write_todos",
+                "arguments": '{"todos":[{"content":"Inspect",',
+            },
+            {
+                "index": 0,
+                "id": "call-plan",
+                "name": "write_todos",
+                "arguments": (
+                    '{"todos":[{"content":"Inspect",'
+                    '"status":"in_progress"}]}'
+                ),
+            },
+        ]
 
     @patch(
         "agentcore_metering.adapters.django.trackers.llm.LLMTracker"
