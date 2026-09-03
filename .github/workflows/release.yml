@@ -1,0 +1,67 @@
+name: Release to PyPI
+
+# Publishes on every version tag (v0.1.0, v0.2.0rc1, ...).
+# Authentication uses PyPI Trusted Publishing (OIDC) - no API token is stored
+# in this repository. Configure the pending publisher on PyPI first:
+#   owner: cloud2ai / repo: agentcore-metering / workflow: release.yml / environment: pypi
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build distributions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tooling
+        run: python -m pip install --upgrade build twine
+
+      - name: Build sdist and wheel
+        run: python -m build
+
+      - name: Verify metadata
+        run: python -m twine check dist/*
+
+      - name: Verify tag matches package version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          version=$(python -c "import re,pathlib; print(re.search(r'__version__ = \"([^\"]+)\"', pathlib.Path('agentcore_metering/__init__.py').read_text()).group(1))")
+          if [ "$tag" != "$version" ]; then
+            echo "::error::Tag $tag does not match agentcore_metering.__version__ = $version"
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    # Tags only: a manual workflow_dispatch run builds and validates, but never
+    # publishes, because the tag/version consistency check cannot run without a tag.
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write  # required for Trusted Publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
