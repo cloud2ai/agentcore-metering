@@ -119,10 +119,40 @@ class TestApplyReasoningEffort:
         apply_reasoning_effort(params, None)
         assert params == {"model": "deepseek/deepseek-chat"}
 
-    def test_openai_compatible_gateway_serving_deepseek_is_left_alone(self):
+    def test_gateway_served_deepseek_also_gets_the_body(self):
+        """Reversed deliberately.
+
+        This used to assert the gateway route was left alone, on the theory
+        that forwarding a vendor field is the gateway's business. The
+        consequence was that a caller's explicit "none" became a silent
+        no-op there -- no way to express the request at all. Probing a live
+        gateway settled it: the field is accepted, not rejected, and the
+        same one-line prompt drops from completion=40 to completion=7.
+        """
+        params = {"model": "openai/deepseek/DeepSeek-V4-Flash/8f94e"}
+        apply_reasoning_effort(params, "none")
+        assert params["extra_body"] == {"thinking": {"type": "disabled"}}
+
+    def test_a_stricter_gateway_can_opt_back_out(self, settings):
+        """The escape hatch, for a deployment whose gateway rejects unknown
+        body fields -- config rather than a fork."""
+        settings.AGENTCORE_DEEPSEEK_THINKING_MODEL_PREFIXES = ("deepseek/",)
         params = {"model": "openai/deepseek/DeepSeek-V4-Flash/8f94e"}
         apply_reasoning_effort(params, "none")
         assert "extra_body" not in params
+
+        # The narrower setting must still cover the native route.
+        native = {"model": "deepseek/deepseek-chat"}
+        apply_reasoning_effort(native, "none")
+        assert native["extra_body"] == {"thinking": {"type": "disabled"}}
+
+    def test_the_body_is_only_sent_when_none_was_asked_for(self):
+        """Bounds the blast radius: a caller that never asked for "none"
+        sends nothing new to any gateway, whatever the prefixes are."""
+        for effort in ("high", "low", "medium"):
+            params = {"model": "openai/deepseek/DeepSeek-V4-Flash/8f94e"}
+            apply_reasoning_effort(params, effort)
+            assert "extra_body" not in params, effort
 
     def test_other_providers_are_left_alone(self):
         params = {"model": "gpt-4o-mini"}
@@ -139,3 +169,34 @@ class TestApplyReasoningEffort:
             "thinking": {"type": "enabled"},
             "foo": 1,
         }
+
+
+@pytest.mark.unit
+class TestDeepseekPrefixOverride:
+    """The override is deployment config, so its failure modes are config
+    mistakes rather than code paths."""
+
+    def test_a_bare_string_is_one_prefix_not_a_bag_of_characters(
+        self, settings
+    ):
+        """tuple("deepseek/") is ("d", "e", "e", ...), and startswith on
+        single characters matches nearly every model string -- the body
+        would go to providers that never asked for it."""
+        settings.AGENTCORE_DEEPSEEK_THINKING_MODEL_PREFIXES = "deepseek/"
+
+        params = {"model": "gpt-4o-mini"}
+        apply_reasoning_effort(params, "none")
+        assert "extra_body" not in params, (
+            "a non-DeepSeek model matched a character of the prefix string"
+        )
+
+        deepseek = {"model": "deepseek/deepseek-chat"}
+        apply_reasoning_effort(deepseek, "none")
+        assert deepseek["extra_body"] == {"thinking": {"type": "disabled"}}
+
+    def test_an_empty_override_disables_the_body_everywhere(self, settings):
+        settings.AGENTCORE_DEEPSEEK_THINKING_MODEL_PREFIXES = ()
+        params = {"model": "deepseek/deepseek-chat"}
+        apply_reasoning_effort(params, "none")
+        assert "extra_body" not in params
+        assert params["reasoning_effort"] == "none"

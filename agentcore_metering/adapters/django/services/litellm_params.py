@@ -7,6 +7,8 @@ Used by runtime_config for validation, test-call, and get_litellm_params.
 
 from typing import Any, Dict, Optional
 
+from django.conf import settings
+
 from agentcore_metering.adapters.django.llm_static.load import (
     get_provider_defaults,
 )
@@ -179,12 +181,45 @@ def _litellm_kwargs_from_config(provider: str, config: dict) -> Dict[str, Any]:
 # anyway. DeepSeek accepts {"thinking": {"type": "disabled"}} in the request
 # body, so "none" is honoured here instead.
 #
-# Matched on LiteLLM's provider prefix rather than on "deepseek" appearing
-# anywhere in the model string: an OpenAI-compatible gateway that happens to
-# serve a DeepSeek model ("openai/deepseek/...") is deliberately left alone,
-# since whether it forwards a vendor field is the gateway's business.
+# Matching used to be LiteLLM's provider prefix alone ("deepseek/"), leaving
+# an OpenAI-compatible gateway serving the same model
+# ("openai/deepseek/DeepSeek-V4-Flash/...") out on the grounds that whether a
+# gateway forwards a vendor field is the gateway's business. In practice that
+# turned a caller's explicit "none" into a silent no-op for every gateway
+# route, with no way to express the request at all -- measured on a live
+# gateway, the same one-line prompt cost completion=40/51 with thinking on
+# and completion=7 with the body field, so the difference is not marginal.
+#
+# Probing that gateway settled the open question the old comment left: it
+# accepts {"thinking": {"type": "disabled"}}, does not reject the unknown
+# field, and actually stops reasoning. So the default now covers gateway
+# routes too.
+#
+# The escape hatch is for deployments whose gateway is stricter than the one
+# measured: set AGENTCORE_DEEPSEEK_THINKING_MODEL_PREFIXES to a narrower
+# tuple (e.g. just ("deepseek/",)) to restore the previous behaviour without
+# a code change. The field is only ever sent when a caller explicitly asked
+# for reasoning_effort="none", so nothing reaches a gateway unasked.
 _NON_THINKING_REASONING_EFFORT = "none"
-_DEEPSEEK_MODEL_PREFIX = "deepseek/"
+_DEFAULT_DEEPSEEK_MODEL_PREFIXES = ("deepseek/", "openai/deepseek/")
+
+
+def _deepseek_model_prefixes() -> tuple:
+    """Model prefixes that accept DeepSeek's thinking-disable body field.
+
+    An empty override disables the body entirely, which is a legitimate way
+    to opt out. A bare string is accepted as a single prefix rather than
+    being iterated: `tuple("deepseek/")` would silently become a tuple of
+    characters, and `startswith` on those matches almost every model string.
+    """
+    configured = getattr(
+        settings, "AGENTCORE_DEEPSEEK_THINKING_MODEL_PREFIXES", None
+    )
+    if configured is None:
+        return _DEFAULT_DEEPSEEK_MODEL_PREFIXES
+    if isinstance(configured, str):
+        return (configured,)
+    return tuple(configured)
 
 
 def apply_reasoning_effort(
@@ -203,7 +238,7 @@ def apply_reasoning_effort(
     if reasoning_effort != _NON_THINKING_REASONING_EFFORT:
         return
     model = str(params.get("model") or "")
-    if not model.startswith(_DEEPSEEK_MODEL_PREFIX):
+    if not model.startswith(_deepseek_model_prefixes()):
         return
     extra_body = dict(params.get("extra_body") or {})
     # setdefault: an explicit thinking directive already on the request wins.
