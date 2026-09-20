@@ -1,31 +1,92 @@
 id: openrouter
 label: OpenRouter
 default_api_base: "https://openrouter.ai/api/v1"
-default_model: google/gemma-2-9b-it:free
+default_model: openai/gpt-5.6-luna
 settings_key: OPENROUTER_CONFIG
 requires_api_base: false
 models:
-  - id: google/gemma-2-9b-it:free
-    label: Gemma 2 9B (free)
-    capabilities: [text-to-text]
-    max_input_tokens: 128000
-    max_output_tokens: 8192
+  - id: openai/gpt-5.6-luna
+    label: OpenAI GPT-5.6 Luna
+    capabilities: [text-to-text, vision, long-context, low-cost]
+    max_input_tokens: 1048576
     mode: chat
-  - id: openai/gpt-4o-mini
-    label: OpenAI GPT-4o Mini
-    capabilities: [text-to-text]
-    max_input_tokens: 128000
-    max_output_tokens: 8192
+    reference_pricing:
+      input_usd_per_1m: 0.2
+      output_usd_per_1m: 1.2
+      source: "https://openrouter.ai/models"
+      updated: "2026-09"
+  - id: anthropic/claude-sonnet-5
+    label: Anthropic Claude Sonnet 5
+    capabilities: [text-to-text, vision, long-context, reasoning]
+    max_input_tokens: 1048576
     mode: chat
-  - id: anthropic/claude-3.5-sonnet
-    label: Claude 3.5 Sonnet
-    capabilities: [text-to-text]
-    max_input_tokens: 128000
-    max_output_tokens: 8192
+    reference_pricing:
+      input_usd_per_1m: 2.0
+      output_usd_per_1m: 10.0
+      source: "https://openrouter.ai/models"
+      updated: "2026-09"
+  - id: google/gemini-3.8-flash
+    label: Google Gemini 3.8 Flash
+    capabilities: [text-to-text, vision, multimodal, long-context]
+    max_input_tokens: 1048576
     mode: chat
-  - id: meta-llama/llama-3.3-70b-instruct
-    label: Llama 3.3 70B
-    capabilities: [text-to-text]
-    max_input_tokens: 128000
-    max_output_tokens: 8192
+  - id: x-ai/grok-4.6
+    label: xAI Grok 4.6
+    capabilities: [text-to-text, vision, code, long-context, reasoning]
+    max_input_tokens: 500000
+    mode: chat
+    reference_pricing:
+      input_usd_per_1m: 2.0
+      output_usd_per_1m: 6.0
+      source: "https://openrouter.ai/models"
+      updated: "2026-09"
+  - id: deepseek/deepseek-v4-pro
+    label: DeepSeek V4 Pro
+    capabilities: [text-to-text, long-context, reasoning]
+    max_input_tokens: 1048576
+    mode: chat
+  - id: qwen/qwen3.8-max
+    label: Qwen3.8 Max
+    capabilities: [text-to-text, vision, multimodal, long-context]
+    max_input_tokens: 1048576
+    mode: chat
+    reference_pricing:
+      input_usd_per_1m: 2.0
+      output_usd_per_1m: 6.0
+      source: "https://openrouter.ai/models"
+      updated: "2026-09"
+  - id: z-ai/glm-5.3
+    label: Z.AI GLM-5.3
+    capabilities: [text-to-text, code, long-context, reasoning]
+    max_input_tokens: 1310720
+    mode: chat
+    reference_pricing:
+      input_usd_per_1m: 0.7
+      output_usd_per_1m: 2.2
+      source: "https://openrouter.ai/models"
+      updated: "2026-09"
+  - id: minimax/minimax-m3
+    label: MiniMax M3
+    capabilities: [text-to-text, vision, multimodal, long-context]
+    max_input_tokens: 1048576
+    mode: chat
+    reference_pricing:
+      input_usd_per_1m: 0.3
+      output_usd_per_1m: 1.2
+      source: "https://openrouter.ai/models"
+      updated: "2026-09"
+  - id: moonshotai/kimi-k3
+    label: MoonshotAI Kimi K3
+    capabilities: [text-to-text, vision, multimodal, long-context, reasoning]
+    max_input_tokens: 1048576
+    mode: chat
+    reference_pricing:
+      input_usd_per_1m: 3.0
+      output_usd_per_1m: 15.0
+      source: "https://openrouter.ai/models"
+      updated: "2026-09"
+  - id: meta-llama/llama-4-maverick
+    label: Meta Llama 4 Maverick
+    capabilities: [text-to-text, vision, long-context]
+    max_input_tokens: 1048576
     mode: chat

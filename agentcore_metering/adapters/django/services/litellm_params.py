@@ -324,8 +324,10 @@ def get_provider_params_schema() -> Dict[str, Any]:
         "num_retries",
     ]
     providers = {}
-    for p in DEFAULT_MODELS:
+    for p in _yaml_defaults:
         required = ["api_key"]
+        if p in PROVIDERS_REQUIRING_API_BASE and p != "azure_openai":
+            required = ["api_key", "api_base"]
         if p == "azure_openai":
             required = ["api_key", "api_base", "deployment"]
             optional = [
@@ -358,7 +360,7 @@ def get_provider_params_schema() -> Dict[str, Any]:
             "optional": optional,
             "editable_params": editable,
             "default_model": DEFAULT_MODELS.get(p),
-            "default_api_base": OFFICIAL_API_BASES.get(p),
+            "default_api_base": OFFICIAL_API_BASES.get(p) or None,
             "default_temperature": OFFICIAL_DEFAULT_TEMPERATURES.get(p),
             "default_top_p": OFFICIAL_DEFAULT_TOP_P.get(p),
             "default_max_tokens": OFFICIAL_DEFAULT_MAX_TOKENS.get(p),

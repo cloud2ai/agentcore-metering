@@ -1,33 +1,49 @@
 id: moonshot
 label: Moonshot (Kimi)
 default_api_base: "https://api.moonshot.cn/v1"
-default_model: moonshot-v1-8k
+default_model: kimi-k2.6
 default_temperature: 1
 default_top_p: 0.95
 settings_key: MOONSHOT_CONFIG
 requires_api_base: false
 models:
+  - id: kimi-k3
+    label: Kimi K3
+    capabilities: [text-to-text, vision, multimodal, long-context, reasoning]
+    max_input_tokens: 1048576
+    mode: chat
+    reference_pricing:
+      input_usd_per_1m: 3.0
+      output_usd_per_1m: 15.0
+      source: "https://platform.kimi.ai/docs/pricing/chat-k3"
+      updated: "2026-09"
+  - id: kimi-k2.7-code
+    label: Kimi K2.7 Code
+    capabilities: [text-to-text, code, long-context]
+    max_input_tokens: 262144
+    mode: chat
+    reference_pricing:
+      input_usd_per_1m: 0.66
+      output_usd_per_1m: 3.4
+      source: "https://platform.kimi.ai/docs/models"
+      updated: "2026-09"
+  - id: kimi-k2.6
+    label: Kimi K2.6
+    capabilities: [text-to-text, long-context]
+    max_input_tokens: 262144
+    mode: chat
+    reference_pricing:
+      input_usd_per_1m: 0.95
+      output_usd_per_1m: 4.0
+      source: "https://platform.kimi.ai/docs/models"
+      updated: "2026-09"
   - id: kimi-k2.5
     label: Kimi K2.5
-    capabilities: [text-to-text, long-context]
-    max_input_tokens: 128000
-    max_output_tokens: 8192
+    capabilities: [text-to-text, long-context, low-cost]
+    max_input_tokens: 262144
     mode: chat
-  - id: moonshot-v1-8k
-    label: Moonshot v1 8K
-    capabilities: [text-to-text]
-    max_input_tokens: 8192
-    max_output_tokens: 4096
-    mode: chat
-  - id: moonshot-v1-32k
-    label: Moonshot v1 32K
-    capabilities: [text-to-text, long-context]
-    max_input_tokens: 32000
-    max_output_tokens: 8192
-    mode: chat
-  - id: moonshot-v1-128k
-    label: Moonshot v1 128K
-    capabilities: [text-to-text, long-context]
-    max_input_tokens: 128000
-    max_output_tokens: 8192
-    mode: chat
+    reference_pricing:
+      input_usd_per_1m: 0.45
+      output_usd_per_1m: 2.25
+      source: "https://platform.kimi.ai/docs/models"
+      updated: "2026-09"

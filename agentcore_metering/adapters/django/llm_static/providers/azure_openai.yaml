@@ -4,57 +4,84 @@ default_model: gpt-4o-mini
 settings_key: AZURE_OPENAI_CONFIG
 requires_api_base: true
 models:
-  - id: gpt-5.2
-    label: GPT-5.2
-    capabilities: [text-to-text, vision, code, multimodal, long-context]
-    max_input_tokens: 128000
-    max_output_tokens: 16384
+  - id: gpt-6-astra
+    label: GPT-6 Astra
+    capabilities: [text-to-text, vision, code, multimodal, long-context, reasoning]
+    max_input_tokens: 1048576
     mode: chat
-  - id: gpt-5.2-pro
-    label: GPT-5.2 Pro
-    capabilities: [text-to-text, vision, code, multimodal, long-context]
-    max_input_tokens: 128000
-    max_output_tokens: 16384
+  - id: gpt-5.6-sol
+    label: GPT-5.6 Sol
+    capabilities: [text-to-text, vision, code, multimodal, long-context, reasoning]
+    max_input_tokens: 1048576
     mode: chat
-  - id: gpt-4-mini
-    label: GPT-4 Mini
-    capabilities: [text-to-text, long-context]
-    max_input_tokens: 128000
-    max_output_tokens: 16384
+  - id: gpt-5.6-terra
+    label: GPT-5.6 Terra
+    capabilities: [text-to-text, vision, code, multimodal, long-context]
+    max_input_tokens: 1048576
+    mode: chat
+  - id: gpt-5.6-luna
+    label: GPT-5.6 Luna
+    capabilities: [text-to-text, vision, multimodal, long-context, low-cost]
+    max_input_tokens: 1048576
+    mode: chat
+  - id: gpt-5.5
+    label: GPT-5.5
+    capabilities: [text-to-text, vision, code, multimodal, long-context, reasoning]
+    max_input_tokens: 1048576
+    mode: chat
+  - id: gpt-5.4
+    label: GPT-5.4
+    capabilities: [text-to-text, vision, code, multimodal, long-context]
+    max_input_tokens: 1048576
+    mode: chat
+  - id: gpt-5.4-mini
+    label: GPT-5.4 Mini
+    capabilities: [text-to-text, vision, long-context, low-cost]
+    max_input_tokens: 400000
+    mode: chat
+  - id: gpt-5.4-nano
+    label: GPT-5.4 Nano
+    capabilities: [text-to-text, low-cost]
+    max_input_tokens: 400000
+    mode: chat
+  - id: gpt-5
+    label: GPT-5
+    capabilities: [text-to-text, vision, long-context, reasoning]
+    max_input_tokens: 400000
     mode: chat
   - id: gpt-5-mini
     label: GPT-5 Mini
-    capabilities: [text-to-text, vision, long-context]
-    max_input_tokens: 128000
-    max_output_tokens: 16384
+    capabilities: [text-to-text, vision, long-context, low-cost]
+    max_input_tokens: 400000
     mode: chat
   - id: gpt-5-nano
     label: GPT-5 Nano
     capabilities: [text-to-text, low-cost]
-    max_input_tokens: 128000
-    max_output_tokens: 8192
+    max_input_tokens: 400000
     mode: chat
-  - id: gpt-4o
-    label: GPT-4o
+  - id: o3
+    label: O3
+    capabilities: [text-to-text, long-context, reasoning]
+    max_input_tokens: 200000
+    mode: chat
+  - id: o4-mini
+    label: O4 Mini
+    capabilities: [text-to-text, long-context, reasoning]
+    max_input_tokens: 200000
+    mode: chat
+  - id: gpt-4.1
+    label: GPT-4.1
     capabilities: [text-to-text, vision, long-context]
-    max_input_tokens: 128000
-    max_output_tokens: 16384
+    max_input_tokens: 1048576
+    mode: chat
+  - id: gpt-4.1-mini
+    label: GPT-4.1 Mini
+    capabilities: [text-to-text, vision, long-context, low-cost]
+    max_input_tokens: 1048576
     mode: chat
   - id: gpt-4o-mini
     label: GPT-4o Mini
     capabilities: [text-to-text, vision, long-context]
     max_input_tokens: 128000
     max_output_tokens: 16384
-    mode: chat
-  - id: o1
-    label: O1
-    capabilities: [text-to-text, long-context, reasoning]
-    max_input_tokens: 200000
-    max_output_tokens: 100000
-    mode: chat
-  - id: o1-mini
-    label: O1 Mini
-    capabilities: [text-to-text, long-context, reasoning]
-    max_input_tokens: 128000
-    max_output_tokens: 65536
     mode: chat
