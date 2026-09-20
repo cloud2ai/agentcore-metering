@@ -85,21 +85,21 @@ pytest tests -v
 |-----------------|------------------|
 | `openai`        | gpt-4o-mini（官方默认 URL） |
 | `azure_openai`  | gpt-4o-mini（需提供 `api_base` 与 `deployment`） |
-| `gemini`        | gemini-2.0-flash |
-| `anthropic`     | claude-3-5-haiku |
-| `mistral`       | mistral-tiny |
-| `dashscope`     | qwen-turbo（阿里通义） |
-| `deepseek`      | deepseek-chat |
-| `xai`           | grok-3-mini-beta（Grok） |
+| `gemini`        | gemini-2.5-flash |
+| `anthropic`     | claude-haiku-4-5 |
+| `mistral`       | mistral-small-4 |
+| `dashscope`     | qwen3.8-flash（阿里通义） |
+| `deepseek`      | deepseek-flash |
+| `xai`           | grok-4.3（Grok） |
 | `meta_llama`    | Llama-3.3-8B-Instruct |
 | `amazon_nova`   | nova-micro-v1 |
-| `nvidia_nim`    | meta/llama3-8b（NVIDIA NIM / Nemotron） |
-| `minimax`       | MiniMax-M2.1 |
+| `nvidia_nim`    | nvidia/nemotron-3-nano-30b-a3b（NVIDIA NIM / Nemotron） |
+| `minimax`       | MiniMax-M2.7 |
 | `openai_compatible` | 取决于第三方网关（OpenAI Compatible 接口） |
-| `moonshot`      | moonshot-v1-8k（Kimi） |
-| `zai`           | glm-4.5-flash（智谱 GLM） |
-| `volcengine`    | doubao-pro-32k（字节豆包） |
-| `openrouter`    | google/gemma-2-9b-it:free |
+| `moonshot`      | kimi-k2.6（Kimi） |
+| `zai`           | glm-5.3-flash（智谱 GLM） |
+| `volcengine`    | doubao-seed-2.0-mini（字节豆包） |
+| `openrouter`    | openai/gpt-5.6-luna |
 
 - 配置仅来自 DB（管理 API），不做 Django settings 回退；需至少有一条启用的全局或用户配置方可调用。
 

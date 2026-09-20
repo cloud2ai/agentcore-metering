@@ -2,17 +2,65 @@ id: volcengine
 label: Volcengine (Doubao)
 settings_key: VOLCENGINE_CONFIG
 requires_api_base: false
-default_model: doubao-pro-32k
+default_model: doubao-seed-2.0-mini
 models:
-  - id: doubao-pro-32k
-    label: Doubao Pro 32K
-    capabilities: [text-to-text]
-    max_input_tokens: 128000
-    max_output_tokens: 8192
+  - id: doubao-seed-2.1-pro
+    label: Doubao Seed 2.1 Pro
+    capabilities: [text-to-text, vision, code, multimodal, long-context]
+    max_input_tokens: 262144
     mode: chat
-  - id: doubao-pro-4k
-    label: Doubao Pro 4K
-    capabilities: [text-to-text]
-    max_input_tokens: 128000
-    max_output_tokens: 8192
+    reference_pricing:
+      input_usd_per_1m: 0.884
+      output_usd_per_1m: 4.42
+      source: "https://www.volcengine.com/pricing"
+      updated: "2026-09"
+  - id: doubao-seed-2.1-turbo
+    label: Doubao Seed 2.1 Turbo
+    capabilities: [text-to-text, vision, multimodal, long-context, low-cost]
+    max_input_tokens: 262144
     mode: chat
+    reference_pricing:
+      input_usd_per_1m: 0.442
+      output_usd_per_1m: 2.212
+      source: "https://www.volcengine.com/pricing"
+      updated: "2026-09"
+  - id: doubao-seed-2.0-code
+    label: Doubao Seed 2.0 Code
+    capabilities: [text-to-text, vision, code, long-context]
+    max_input_tokens: 262144
+    mode: chat
+    reference_pricing:
+      input_usd_per_1m: 0.67
+      output_usd_per_1m: 3.36
+      source: "https://www.volcengine.com/pricing"
+      updated: "2026-09"
+  - id: doubao-seed-2.0-pro
+    label: Doubao Seed 2.0 Pro
+    capabilities: [text-to-text, vision, multimodal, long-context]
+    max_input_tokens: 262144
+    mode: chat
+    reference_pricing:
+      input_usd_per_1m: 0.67
+      output_usd_per_1m: 3.36
+      source: "https://www.volcengine.com/pricing"
+      updated: "2026-09"
+  - id: doubao-seed-2.0-lite
+    label: Doubao Seed 2.0 Lite
+    capabilities: [text-to-text, vision, long-context, low-cost]
+    max_input_tokens: 262144
+    mode: chat
+    reference_pricing:
+      input_usd_per_1m: 0.13
+      output_usd_per_1m: 0.76
+      source: "https://www.volcengine.com/pricing"
+      updated: "2026-09"
+  - id: doubao-seed-2.0-mini
+    label: Doubao Seed 2.0 Mini
+    capabilities: [text-to-text, vision, low-cost]
+    max_input_tokens: 262144
+    mode: chat
+    reference_pricing:
+      input_usd_per_1m: 0.06
+      output_usd_per_1m: 0.56
+      source: "https://www.volcengine.com/pricing"
+      updated: "2026-09"

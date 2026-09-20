@@ -5,9 +5,53 @@ default_model: nova-micro-v1
 settings_key: AMAZON_NOVA_CONFIG
 requires_api_base: false
 models:
-  - id: nova-micro-v1
-    label: Nova Micro v1
-    capabilities: [text-to-text, long-context]
-    max_input_tokens: 128000
-    max_output_tokens: 8192
+  - id: nova-2-lite-v1
+    label: Nova 2 Lite
+    capabilities: [text-to-text, vision, multimodal, long-context, reasoning]
+    max_input_tokens: 1048576
     mode: chat
+    reference_pricing:
+      input_usd_per_1m: 0.3
+      output_usd_per_1m: 2.5
+      source: "https://aws.amazon.com/bedrock/pricing"
+      updated: "2026-09"
+  - id: nova-premier-v1
+    label: Nova Premier
+    capabilities: [text-to-text, vision, long-context]
+    max_input_tokens: 1048576
+    mode: chat
+    reference_pricing:
+      input_usd_per_1m: 2.5
+      output_usd_per_1m: 12.5
+      source: "https://aws.amazon.com/bedrock/pricing"
+      updated: "2026-09"
+  - id: nova-pro-v1
+    label: Nova Pro
+    capabilities: [text-to-text, vision, long-context]
+    max_input_tokens: 300000
+    mode: chat
+    reference_pricing:
+      input_usd_per_1m: 0.8
+      output_usd_per_1m: 3.2
+      source: "https://aws.amazon.com/bedrock/pricing"
+      updated: "2026-09"
+  - id: nova-lite-v1
+    label: Nova Lite
+    capabilities: [text-to-text, vision, long-context, low-cost]
+    max_input_tokens: 300000
+    mode: chat
+    reference_pricing:
+      input_usd_per_1m: 0.06
+      output_usd_per_1m: 0.24
+      source: "https://aws.amazon.com/bedrock/pricing"
+      updated: "2026-09"
+  - id: nova-micro-v1
+    label: Nova Micro
+    capabilities: [text-to-text, low-cost]
+    max_input_tokens: 128000
+    mode: chat
+    reference_pricing:
+      input_usd_per_1m: 0.04
+      output_usd_per_1m: 0.14
+      source: "https://aws.amazon.com/bedrock/pricing"
+      updated: "2026-09"

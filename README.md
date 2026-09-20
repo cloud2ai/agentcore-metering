@@ -91,21 +91,21 @@ pytest tests -v
 |-----------------|------------------------|
 | `openai`        | gpt-4o-mini (official default URL) |
 | `azure_openai`  | gpt-4o-mini (requires `api_base` and `deployment`) |
-| `gemini`        | gemini-2.0-flash |
-| `anthropic`     | claude-3-5-haiku |
-| `mistral`       | mistral-tiny |
-| `dashscope`     | qwen-turbo (Alibaba Qwen) |
-| `deepseek`      | deepseek-chat |
-| `xai`           | grok-3-mini-beta (Grok) |
+| `gemini`        | gemini-2.5-flash |
+| `anthropic`     | claude-haiku-4-5 |
+| `mistral`       | mistral-small-4 |
+| `dashscope`     | qwen3.8-flash (Alibaba Qwen) |
+| `deepseek`      | deepseek-flash |
+| `xai`           | grok-4.3 (Grok) |
 | `meta_llama`    | Llama-3.3-8B-Instruct |
 | `amazon_nova`   | nova-micro-v1 |
-| `nvidia_nim`    | meta/llama3-8b (Nemotron / NIM) |
-| `minimax`       | MiniMax-M2.1 |
+| `nvidia_nim`    | nvidia/nemotron-3-nano-30b-a3b (Nemotron / NIM) |
+| `minimax`       | MiniMax-M2.7 |
 | `openai_compatible` | Depends on the gateway vendor (OpenAI Compatible endpoint) |
-| `moonshot`      | moonshot-v1-8k (Kimi) |
-| `zai`           | glm-4.5-flash (Z.AI GLM) |
-| `volcengine`    | doubao-pro-32k (ByteDance Doubao) |
-| `openrouter`    | google/gemma-2-9b-it:free |
+| `moonshot`      | kimi-k2.6 (Kimi) |
+| `zai`           | glm-5.3-flash (Z.AI GLM) |
+| `volcengine`    | doubao-seed-2.0-mini (ByteDance Doubao) |
+| `openrouter`    | openai/gpt-5.6-luna |
 
 - Config is from DB only (admin API); no Django settings fallback. At least one enabled global or user config is required for calls.
 

@@ -1,48 +1,107 @@
 id: dashscope
 label: Dashscope (Qwen)
 default_api_base: "https://dashscope.aliyuncs.com/compatible-mode/v1"
-default_model: qwen-turbo
+default_model: qwen3.8-flash
 settings_key: DASHSCOPE_CONFIG
 requires_api_base: false
 models:
+  - id: qwen3.8-max
+    label: Qwen3.8 Max
+    capabilities: [text-to-text, vision, code, multimodal, long-context]
+    max_input_tokens: 1048576
+    mode: chat
+    reference_pricing:
+      input_usd_per_1m: 2.0
+      output_usd_per_1m: 6.0
+      source: "https://www.alibabacloud.com/help/en/model-studio/model-pricing"
+      updated: "2026-09"
+  - id: qwen3.8-max-0902
+    label: Qwen3.8 Max (0902)
+    capabilities: [text-to-text, vision, code, multimodal, long-context]
+    max_input_tokens: 1048576
+    mode: chat
+    reference_pricing:
+      input_usd_per_1m: 2.0
+      output_usd_per_1m: 6.0
+      source: "https://www.alibabacloud.com/help/en/model-studio/model-pricing"
+      updated: "2026-09"
+  - id: qwen3.7-max
+    label: Qwen3.7 Max
+    capabilities: [text-to-text, vision, code, multimodal, long-context]
+    max_input_tokens: 1048576
+    mode: chat
+    reference_pricing:
+      input_usd_per_1m: 2.5
+      output_usd_per_1m: 7.5
+      source: "https://www.alibabacloud.com/help/en/model-studio/model-pricing"
+      updated: "2026-09"
   - id: qwen3-max
     label: Qwen3 Max
     capabilities: [text-to-text, vision, multimodal, long-context]
-    max_input_tokens: 128000
-    max_output_tokens: 8192
+    max_input_tokens: 262144
     mode: chat
-  - id: qwen3-max-preview
-    label: Qwen3 Max Preview
+    reference_pricing:
+      input_usd_per_1m: 1.2
+      output_usd_per_1m: 6.0
+      source: "https://www.alibabacloud.com/help/en/model-studio/model-pricing"
+      updated: "2026-09"
+  - id: qwen3.7-plus
+    label: Qwen3.7 Plus
     capabilities: [text-to-text, vision, multimodal, long-context]
-    max_input_tokens: 128000
-    max_output_tokens: 8192
+    max_input_tokens: 1048576
     mode: chat
-  - id: qwen-max-latest
-    label: Qwen Max Latest
+    reference_pricing:
+      input_usd_per_1m: 0.32
+      output_usd_per_1m: 1.28
+      source: "https://www.alibabacloud.com/help/en/model-studio/model-pricing"
+      updated: "2026-09"
+  - id: qwen3.6-plus
+    label: Qwen3.6 Plus
+    capabilities: [text-to-text, vision, long-context]
+    max_input_tokens: 1048576
+    mode: chat
+    reference_pricing:
+      input_usd_per_1m: 0.5
+      output_usd_per_1m: 3.0
+      source: "https://www.alibabacloud.com/help/en/model-studio/model-pricing"
+      updated: "2026-09"
+  - id: qwen3.8-flash
+    label: Qwen3.8 Flash
+    capabilities: [text-to-text, vision, long-context, low-cost]
+    max_input_tokens: 1048576
+    mode: chat
+    reference_pricing:
+      input_usd_per_1m: 0.15
+      output_usd_per_1m: 0.47
+      source: "https://www.alibabacloud.com/help/en/model-studio/model-pricing"
+      updated: "2026-09"
+  - id: qwen3.7-flash
+    label: Qwen3.7 Flash
+    capabilities: [text-to-text, vision, low-cost]
+    max_input_tokens: 262144
+    mode: chat
+  - id: qwen3-coder-plus
+    label: Qwen3 Coder Plus
+    capabilities: [text-to-text, code, long-context]
+    max_input_tokens: 1048576
+    mode: chat
+    reference_pricing:
+      input_usd_per_1m: 1.0
+      output_usd_per_1m: 5.0
+      source: "https://www.alibabacloud.com/help/en/model-studio/model-pricing"
+      updated: "2026-09"
+  - id: qwen3-vl-plus
+    label: Qwen3 VL Plus
     capabilities: [text-to-text, vision, multimodal, long-context]
-    max_input_tokens: 128000
-    max_output_tokens: 8192
+    max_input_tokens: 262144
     mode: chat
-  - id: qwen-plus
-    label: Qwen Plus
-    capabilities: [text-to-text, long-context]
-    max_input_tokens: 128000
-    max_output_tokens: 8192
-    mode: chat
-  - id: qwen-turbo
-    label: Qwen Turbo
-    capabilities: [text-to-text, low-cost]
-    max_input_tokens: 128000
-    max_output_tokens: 8192
-    mode: chat
-  - id: qwen-long
-    label: Qwen Long
-    capabilities: [text-to-text, long-context]
-    max_input_tokens: 128000
-    max_output_tokens: 8192
-    mode: chat
-  - id: text-embedding-v3
-    label: Text Embedding V3
+    reference_pricing:
+      input_usd_per_1m: 0.2
+      output_usd_per_1m: 1.6
+      source: "https://www.alibabacloud.com/help/en/model-studio/model-pricing"
+      updated: "2026-09"
+  - id: text-embedding-v4
+    label: Text Embedding V4
     capabilities: [embedding]
     max_input_tokens: 8191
     mode: embedding

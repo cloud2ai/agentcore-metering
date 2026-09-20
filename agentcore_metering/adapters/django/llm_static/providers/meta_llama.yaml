@@ -5,9 +5,23 @@ default_model: Llama-3.3-8B-Instruct
 settings_key: META_LLAMA_CONFIG
 requires_api_base: false
 models:
-  - id: Llama-3.3-8B-Instruct
-    label: Llama 3.3 8B Instruct
+  - id: Llama-4-Maverick-17B-128E-Instruct-FP8
+    label: Llama 4 Maverick 17B
+    capabilities: [text-to-text, vision, multimodal, long-context]
+    max_input_tokens: 128000
+    mode: chat
+  - id: Llama-4-Scout-17B-16E-Instruct-FP8
+    label: Llama 4 Scout 17B
+    capabilities: [text-to-text, vision, multimodal, long-context]
+    max_input_tokens: 128000
+    mode: chat
+  - id: Llama-3.3-70B-Instruct
+    label: Llama 3.3 70B Instruct
     capabilities: [text-to-text, long-context]
     max_input_tokens: 128000
-    max_output_tokens: 8192
+    mode: chat
+  - id: Llama-3.3-8B-Instruct
+    label: Llama 3.3 8B Instruct
+    capabilities: [text-to-text, low-cost]
+    max_input_tokens: 128000
     mode: chat
