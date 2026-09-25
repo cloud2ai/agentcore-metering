@@ -1,0 +1,7 @@
+id: agione
+label: AGIOne
+default_api_base: "https://agione.pro/hyperone/xapi/api"
+default_model: ""
+settings_key: AGIONE_CONFIG
+requires_api_base: true
+models: []

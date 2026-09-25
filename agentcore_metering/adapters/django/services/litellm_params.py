@@ -57,7 +57,7 @@ def _model_string(provider: str, config: dict) -> str:
     model = (config.get("model") or "").strip() or DEFAULT_MODELS.get(
         provider, "gpt-4o-mini"
     )
-    if provider == "openai_compatible":
+    if provider in {"openai_compatible", "agione"}:
         # LiteLLM routes by model string prefix (e.g. "deepseek/" → DeepSeek
         # official API), ignoring api_base. Prepend "openai/" unconditionally
         # so LiteLLM uses the OpenAI client and forwards the model name as-is
@@ -112,7 +112,7 @@ def _litellm_kwargs_from_config(provider: str, config: dict) -> Dict[str, Any]:
         "api_key": config.get("api_key") or None,
         "api_base": api_base,
     }
-    if provider == "openai_compatible":
+    if provider in {"openai_compatible", "agione"}:
         kwargs["custom_llm_provider"] = "openai"
     if provider == "azure_openai":
         kwargs["api_version"] = config.get("api_version")
