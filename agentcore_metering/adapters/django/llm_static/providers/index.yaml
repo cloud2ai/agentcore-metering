@@ -1,5 +1,6 @@
 # Order of providers for UI and resolution
 provider_ids:
+  - agione
   - openai
   - openai_compatible
   - azure_openai

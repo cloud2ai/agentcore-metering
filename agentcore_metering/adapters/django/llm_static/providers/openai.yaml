@@ -15,8 +15,8 @@ models:
       output_usd_per_1m: 50.0
       source: "https://openai.com/api/pricing"
       updated: "2026-09"
-  - id: gpt-5.6-sol
-    label: GPT-5.6 Sol
+  - id: gpt-6-sol
+    label: GPT-6 Sol
     capabilities: [text-to-text, vision, code, multimodal, long-context, reasoning]
     max_input_tokens: 1048576
     mode: chat
@@ -35,8 +35,8 @@ models:
       output_usd_per_1m: 12.0
       source: "https://openai.com/api/pricing"
       updated: "2026-09"
-  - id: gpt-5.6-luna
-    label: GPT-5.6 Luna
+  - id: gpt-6-luna
+    label: GPT-6 Luna
     capabilities: [text-to-text, vision, multimodal, long-context, low-cost]
     max_input_tokens: 1048576
     mode: chat
