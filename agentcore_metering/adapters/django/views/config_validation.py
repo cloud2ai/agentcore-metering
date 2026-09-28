@@ -7,6 +7,7 @@ from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from agentcore_metering.adapters.django.models import LLMConfig
 from agentcore_metering.adapters.django.serializers import (
     ConfigTestResponseSerializer,
     LLMConfigWriteSerializer,
@@ -20,6 +21,25 @@ from agentcore_metering.adapters.django.services.runtime_config import (
     run_test_call_stream,
     validate_llm_config,
 )
+from agentcore_metering.adapters.django.views.config_management import (
+    _preserve_masked_secret_fields,
+)
+
+
+def _load_stored_config(config_uuid, config_id):
+    """Return the existing LLMConfig being tested, or None."""
+    qs = LLMConfig.objects.select_related("user")
+    if config_uuid:
+        try:
+            return qs.get(uuid=config_uuid)
+        except (LLMConfig.DoesNotExist, ValueError, TypeError):
+            return None
+    if config_id is not None:
+        try:
+            return qs.get(pk=config_id)
+        except (LLMConfig.DoesNotExist, ValueError, TypeError):
+            return None
+    return None
 
 
 class AdminLLMConfigTestView(APIView):
@@ -55,6 +75,14 @@ class AdminLLMConfigTestView(APIView):
         data = ser.validated_data
         provider = (data.get("provider") or "openai").strip().lower()
         config = data.get("config") or {}
+        # The edit form is populated from the masked read serializer, so its
+        # api_key is a placeholder. Resolve those fields from the stored config
+        # before validating, otherwise the mask is sent as the real key.
+        stored = _load_stored_config(
+            data.get("config_uuid"), data.get("config_id")
+        )
+        if stored is not None:
+            config = _preserve_masked_secret_fields(stored.config or {}, config)
         ok, message = validate_llm_config(provider, config, user=request.user)
         if ok:
             return Response({"ok": True})
