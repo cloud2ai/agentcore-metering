@@ -118,6 +118,20 @@ class LLMConfigWriteSerializer(serializers.Serializer):
             "on other global configs). Ignored for user-scope configs."
         ),
     )
+    config_uuid = serializers.UUIDField(
+        required=False,
+        allow_null=True,
+        help_text=(
+            "Optional. When testing an existing config, its uuid lets the "
+            "server resolve masked secret fields (e.g. api_key) from storage "
+            "instead of sending the mask as the key."
+        ),
+    )
+    config_id = serializers.IntegerField(
+        required=False,
+        allow_null=True,
+        help_text="Deprecated: integer id of the config being tested.",
+    )
 
 
 class ErrorDetailSerializer(serializers.Serializer):
@@ -493,6 +507,11 @@ class ProviderModelsEntrySerializer(serializers.Serializer):
 
     id = serializers.CharField(help_text="Provider id")
     name = serializers.CharField(allow_null=True, required=False)
+    icon = serializers.CharField(
+        allow_null=True,
+        required=False,
+        help_text="Optional brand logo URL for UI",
+    )
     models = ModelEntrySerializer(many=True)
     default_api_base = serializers.CharField(allow_null=True, required=False)
 

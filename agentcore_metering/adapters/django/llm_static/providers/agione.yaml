@@ -1,5 +1,6 @@
 id: agione
 label: AGIOne
+icon: "https://agione.pro/static/images/favicon.png"
 default_api_base: "https://agione.pro/hyperone/xapi/api"
 default_model: ""
 settings_key: AGIONE_CONFIG
