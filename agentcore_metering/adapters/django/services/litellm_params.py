@@ -84,18 +84,16 @@ def resolve_llm_protocol(provider: str, model: str) -> str:
 def _agione_model_string(model: str) -> str:
     """Build the LiteLLM model string that selects AGIOne's protocol.
 
-    LiteLLM strips the leading ``<provider>/`` segment before the request
-    reaches the gateway, so a Responses call needs one extra copy of the
-    family segment: ``openai/responses/<family>/<model>`` survives as
-    ``<family>/<model>`` at the gateway. The ``responses/`` marker switches
+    LiteLLM strips the leading provider and ``responses/`` marker before
+    the request reaches the gateway. Keep the configured model, including
+    its existing family segment, exactly once. The marker switches
     LiteLLM from its Chat Completions client to its Responses API bridge,
     which returns the same ``ModelResponse``/stream shape as any other
     provider — so metering, retries and tool-call handling are unchanged.
     """
     protocol = resolve_llm_protocol("agione", model)
     if protocol == PROTOCOL_RESPONSES:
-        family = (model or "").strip().split("/", 1)[0].lower()
-        return f"openai/responses/{family}/{model}"
+        return f"openai/responses/{model}"
     if protocol == PROTOCOL_MESSAGES:
         return f"anthropic/{model}"
     return f"openai/{model}"

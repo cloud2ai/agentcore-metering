@@ -209,7 +209,7 @@ def test_user_catalog_has_no_saved_secrets(authenticated_client):
     model = next(
         model for provider in response.data["providers"]
         if provider["id"] == "openai"
-        for model in provider["models"] if model["id"] == "gpt-4o"
+        for model in provider["models"] if model["id"] == "gpt-5.4"
     )
     assert model["model_info"]["supported_modalities"] == ["text", "image"]
     assert APIClient().get(url).status_code == 403
