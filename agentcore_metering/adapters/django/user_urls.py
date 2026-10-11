@@ -17,7 +17,9 @@ from agentcore_metering.adapters.django.views.decisions import (
 app_name = "agentcore_metering_user"
 
 urlpatterns = [
-    path("llm-config/models", UserLLMConfigModelsView.as_view(), name="models"),
+    path(
+        "llm-config/models", UserLLMConfigModelsView.as_view(), name="models",
+    ),
     path(
         "llm-config/providers", UserLLMConfigProvidersView.as_view(),
         name="providers",

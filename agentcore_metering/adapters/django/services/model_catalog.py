@@ -53,9 +53,12 @@ def get_providers_with_models() -> Dict[str, Any]:
             for m in provider["models"]
         } | {"decision"})
         for model in config["models"]:
-            provider["models"] = [
-                m for m in provider["models"] if m["id"] != model
-            ]
+            # A mixed provider can expose the same alias through chat and
+            # decisions. Preserve its existing mode and capabilities so
+            # legacy chat pickers keep seeing it. Decision choices are also
+            # listed separately in the provider's decision params schema.
+            if any(m["id"] == model for m in provider["models"]):
+                continue
             provider["models"].append({
                 "id": model, "label": model, "mode": "decisions",
                 "capabilities": ["decision"],

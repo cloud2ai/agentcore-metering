@@ -48,6 +48,58 @@ PROVIDERS_REQUIRING_API_BASE = frozenset(
     p for p, d in _yaml_defaults.items() if d.get("requires_api_base")
 )
 
+PROTOCOL_CHAT_COMPLETIONS = "chat_completions"
+PROTOCOL_RESPONSES = "responses"
+PROTOCOL_MESSAGES = "messages"
+
+# AGIOne is a gateway, not a vendor: each model speaks exactly one wire
+# protocol and the gateway rejects the others, so the endpoint has to be
+# picked per model. The model id's first path segment names the upstream
+# family, which is what selects the protocol.
+_AGIONE_RESPONSES_FAMILIES = frozenset({"openai"})
+_AGIONE_MESSAGES_FAMILIES = frozenset({"anthropic"})
+
+
+def resolve_llm_protocol(provider: str, model: str) -> str:
+    """Return the wire protocol a configured model must be called with.
+
+    Only AGIOne needs per-model routing, by the model id's first segment:
+
+    - ``openai/*``    -> ``responses``        (``/v1/responses``)
+    - ``anthropic/*`` -> ``messages``         (``/v1/messages``)
+    - anything else   -> ``chat_completions`` (``/v1/chat/completions``)
+
+    Every other provider keeps the default Chat Completions protocol.
+    """
+    if (provider or "").strip().lower() != "agione":
+        return PROTOCOL_CHAT_COMPLETIONS
+    family = (model or "").strip().split("/", 1)[0].lower()
+    if family in _AGIONE_RESPONSES_FAMILIES:
+        return PROTOCOL_RESPONSES
+    if family in _AGIONE_MESSAGES_FAMILIES:
+        return PROTOCOL_MESSAGES
+    return PROTOCOL_CHAT_COMPLETIONS
+
+
+def _agione_model_string(model: str) -> str:
+    """Build the LiteLLM model string that selects AGIOne's protocol.
+
+    LiteLLM strips the leading ``<provider>/`` segment before the request
+    reaches the gateway, so a Responses call needs one extra copy of the
+    family segment: ``openai/responses/<family>/<model>`` survives as
+    ``<family>/<model>`` at the gateway. The ``responses/`` marker switches
+    LiteLLM from its Chat Completions client to its Responses API bridge,
+    which returns the same ``ModelResponse``/stream shape as any other
+    provider — so metering, retries and tool-call handling are unchanged.
+    """
+    protocol = resolve_llm_protocol("agione", model)
+    if protocol == PROTOCOL_RESPONSES:
+        family = (model or "").strip().split("/", 1)[0].lower()
+        return f"openai/responses/{family}/{model}"
+    if protocol == PROTOCOL_MESSAGES:
+        return f"anthropic/{model}"
+    return f"openai/{model}"
+
 
 def _model_string(provider: str, config: dict) -> str:
     """
@@ -58,6 +110,8 @@ def _model_string(provider: str, config: dict) -> str:
     model = (config.get("model") or "").strip() or DEFAULT_MODELS.get(
         provider, "gpt-4o-mini"
     )
+    if provider == "agione":
+        return _agione_model_string(model)
     if provider == "openai_compatible":
         # LiteLLM routes by model string prefix (e.g. "deepseek/" → DeepSeek
         # official API), ignoring api_base. Prepend "openai/" unconditionally
@@ -113,6 +167,14 @@ def _litellm_kwargs_from_config(provider: str, config: dict) -> Dict[str, Any]:
         "api_key": config.get("api_key") or None,
         "api_base": api_base,
     }
+    if provider == "agione":
+        # AGIOne's ``anthropic/*`` models speak the Anthropic Messages API;
+        # everything else goes through the OpenAI client (Chat Completions,
+        # or the Responses bridge selected by the model string above).
+        protocol = resolve_llm_protocol(provider, config.get("model"))
+        kwargs["custom_llm_provider"] = (
+            "anthropic" if protocol == PROTOCOL_MESSAGES else "openai"
+        )
     if provider == "openai_compatible":
         kwargs["custom_llm_provider"] = "openai"
     if provider == "azure_openai":
@@ -325,8 +387,10 @@ def get_provider_params_schema() -> Dict[str, Any]:
         "num_retries",
     ]
     providers = {}
-    for p in DEFAULT_MODELS:
+    for p in _yaml_defaults:
         required = ["api_key"]
+        if p in PROVIDERS_REQUIRING_API_BASE and p != "azure_openai":
+            required = ["api_key", "api_base"]
         if p == "azure_openai":
             required = ["api_key", "api_base", "deployment"]
             optional = [
@@ -359,7 +423,7 @@ def get_provider_params_schema() -> Dict[str, Any]:
             "optional": optional,
             "editable_params": editable,
             "default_model": DEFAULT_MODELS.get(p),
-            "default_api_base": OFFICIAL_API_BASES.get(p),
+            "default_api_base": OFFICIAL_API_BASES.get(p) or None,
             "default_temperature": OFFICIAL_DEFAULT_TEMPERATURES.get(p),
             "default_top_p": OFFICIAL_DEFAULT_TOP_P.get(p),
             "default_max_tokens": OFFICIAL_DEFAULT_MAX_TOKENS.get(p),

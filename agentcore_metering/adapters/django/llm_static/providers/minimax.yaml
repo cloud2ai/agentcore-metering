@@ -1,25 +1,37 @@
 id: minimax
 label: MiniMax
 default_api_base: "https://api.minimaxi.com/v1"
-default_model: MiniMax-M2.1
+default_model: MiniMax-M2.7
 settings_key: MINIMAX_CONFIG
 requires_api_base: false
 models:
+  - id: MiniMax-M3
+    label: MiniMax M3
+    capabilities: [text-to-text, vision, code, multimodal, long-context]
+    max_input_tokens: 1048576
+    mode: chat
+    reference_pricing:
+      input_usd_per_1m: 0.3
+      output_usd_per_1m: 1.2
+      source: "https://platform.minimax.io/docs/guides/pricing-paygo"
+      updated: "2026-09"
+  - id: MiniMax-M2.7
+    label: MiniMax M2.7
+    capabilities: [text-to-text, code, long-context, reasoning]
+    max_input_tokens: 204800
+    mode: chat
+    reference_pricing:
+      input_usd_per_1m: 0.3
+      output_usd_per_1m: 1.2
+      source: "https://platform.minimax.io/docs/guides/pricing-paygo"
+      updated: "2026-09"
   - id: MiniMax-M2.5
     label: MiniMax M2.5
-    capabilities: [text-to-text, vision, multimodal, low-cost]
-    max_input_tokens: 128000
-    max_output_tokens: 8192
+    capabilities: [text-to-text, code, long-context, low-cost]
+    max_input_tokens: 204800
     mode: chat
-  - id: MiniMax-M2.1
-    label: MiniMax M2.1
-    capabilities: [text-to-text, vision, multimodal, low-cost]
-    max_input_tokens: 128000
-    max_output_tokens: 8192
-    mode: chat
-  - id: abab6.5s-chat
-    label: ABAB 6.5s Chat
-    capabilities: [text-to-text]
-    max_input_tokens: 128000
-    max_output_tokens: 8192
-    mode: chat
+    reference_pricing:
+      input_usd_per_1m: 0.3
+      output_usd_per_1m: 1.2
+      source: "https://platform.minimax.io/docs/guides/pricing-paygo"
+      updated: "2026-09"

@@ -83,6 +83,15 @@ def _default_usage_dict(model: str) -> Dict[str, Any]:
     }
 
 
+def _requires_none_reasoning_for_tools(params: Dict[str, Any], tools: Any) -> bool:
+    """Return whether the selected Chat Completions model needs none effort."""
+
+    if not tools:
+        return False
+    model = str(params.get("model") or "").lower()
+    return model.startswith("openai/gpt-6-") or model.startswith("gpt-6-")
+
+
 def _record_failed_llm_call(
     *,
     effective_state: Dict[str, Any],
@@ -293,6 +302,8 @@ class LLMTracker:
         apply_reasoning_effort(params, reasoning_effort)
         if tools is not None:
             params["tools"] = tools
+        if _requires_none_reasoning_for_tools(params, tools):
+            apply_reasoning_effort(params, "none")
         if tool_choice is not None:
             params["tool_choice"] = tool_choice
 

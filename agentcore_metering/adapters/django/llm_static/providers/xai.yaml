@@ -1,25 +1,67 @@
 id: xai
 label: xAI (Grok)
 default_api_base: "https://api.x.ai/v1"
-default_model: grok-3-mini-beta
+default_model: grok-4.3
 settings_key: XAI_CONFIG
 requires_api_base: false
 models:
-  - id: grok-3-mini-beta
-    label: Grok 3 Mini Beta
-    capabilities: [text-to-text]
-    max_input_tokens: 128000
-    max_output_tokens: 8192
+  - id: grok-4.6
+    label: Grok 4.6
+    capabilities: [text-to-text, vision, code, long-context, reasoning]
+    max_input_tokens: 500000
     mode: chat
-  - id: grok-2-vision-1212
-    label: Grok 2 Vision
-    capabilities: [text-to-text]
-    max_input_tokens: 128000
-    max_output_tokens: 8192
+    reference_pricing:
+      input_usd_per_1m: 2.0
+      output_usd_per_1m: 6.0
+      source: "https://docs.x.ai/docs/models"
+      updated: "2026-09"
+  - id: grok-4.5
+    label: Grok 4.5
+    capabilities: [text-to-text, vision, code, long-context, reasoning]
+    max_input_tokens: 500000
     mode: chat
-  - id: grok-2
-    label: Grok 2
-    capabilities: [text-to-text]
-    max_input_tokens: 128000
-    max_output_tokens: 8192
+    reference_pricing:
+      input_usd_per_1m: 2.0
+      output_usd_per_1m: 6.0
+      source: "https://docs.x.ai/docs/models"
+      updated: "2026-09"
+  - id: grok-4.3
+    label: Grok 4.3
+    capabilities: [text-to-text, vision, long-context, reasoning]
+    max_input_tokens: 1048576
     mode: chat
+    reference_pricing:
+      input_usd_per_1m: 1.25
+      output_usd_per_1m: 2.5
+      source: "https://docs.x.ai/docs/models"
+      updated: "2026-09"
+  - id: grok-4.20
+    label: Grok 4.20
+    capabilities: [text-to-text, vision, long-context, reasoning]
+    max_input_tokens: 2097152
+    mode: chat
+    reference_pricing:
+      input_usd_per_1m: 1.25
+      output_usd_per_1m: 2.5
+      source: "https://docs.x.ai/docs/models"
+      updated: "2026-09"
+  - id: grok-4.20-multi-agent
+    label: Grok 4.20 Multi-Agent
+    capabilities: [text-to-text, long-context, reasoning]
+    max_input_tokens: 2097152
+    mode: chat
+    reference_pricing:
+      input_usd_per_1m: 1.25
+      output_usd_per_1m: 2.5
+      source: "https://docs.x.ai/docs/models"
+      updated: "2026-09"
+  - id: grok-build-0.1
+    label: Grok Build 0.1
+    capabilities: [text-to-text, code, long-context]
+    max_input_tokens: 262144
+    mode: chat
+    reference_pricing:
+      input_usd_per_1m: 1.0
+      output_usd_per_1m: 2.0
+      source: "https://docs.x.ai/docs/models"
+      updated: "2026-09"

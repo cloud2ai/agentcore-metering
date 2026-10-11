@@ -47,6 +47,19 @@ def test_decision_catalog_preserves_legacy_entries():
             assert model in providers[provider["id"]]["models"]
 
 
+def test_mixed_provider_alias_stays_visible_to_chat_pickers():
+    providers = {
+        p["id"]: p for p in get_providers_with_models()["providers"]
+    }
+    models = [
+        m for m in providers["openai"]["models"] if m["id"] == "gpt-6-luna"
+    ]
+    assert len(models) == 1
+    assert models[0]["mode"] == "chat"
+    assert "vision" in models[0]["capabilities"]
+    assert "decision" in providers["openai"]["model_types"]
+
+
 @pytest.mark.parametrize("provider,model", [
     ("openai", "gpt-6-luna"),
     ("openrouter", "typesafe/jev-1.13"),

@@ -162,6 +162,20 @@ class LLMConfigWriteSerializer(serializers.Serializer):
             "on other global configs). Ignored for user-scope configs."
         ),
     )
+    config_uuid = serializers.UUIDField(
+        required=False,
+        allow_null=True,
+        help_text=(
+            "Optional. When testing an existing config, its uuid lets the "
+            "server resolve masked secret fields (e.g. api_key) from storage "
+            "instead of sending the mask as the key."
+        ),
+    )
+    config_id = serializers.IntegerField(
+        required=False,
+        allow_null=True,
+        help_text="Deprecated: integer id of the config being tested.",
+    )
 
     def validate_config(self, value):
         if not isinstance(value, dict):
@@ -662,6 +676,11 @@ class ProviderModelsEntrySerializer(serializers.Serializer):
     id = serializers.CharField(help_text="Provider id")
     label = serializers.CharField(required=False)
     name = serializers.CharField(allow_null=True, required=False)
+    icon = serializers.CharField(
+        allow_null=True,
+        required=False,
+        help_text="Optional brand logo URL for UI",
+    )
     models = ModelEntrySerializer(many=True)
     default_api_base = serializers.CharField(allow_null=True, required=False)
     model_types = serializers.ListField(

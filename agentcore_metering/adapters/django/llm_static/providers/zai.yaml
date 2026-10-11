@@ -2,23 +2,75 @@ id: zai
 label: Z.AI (GLM)
 settings_key: ZAI_CONFIG
 requires_api_base: false
-default_model: glm-4.5-flash
+default_model: glm-5.3-flash
 models:
-  - id: glm-4-plus
-    label: GLM-4 Plus
-    capabilities: [text-to-text]
-    max_input_tokens: 128000
-    max_output_tokens: 8192
+  - id: glm-5.3
+    label: GLM-5.3
+    capabilities: [text-to-text, code, long-context, reasoning]
+    max_input_tokens: 1310720
     mode: chat
-  - id: glm-4-flash
-    label: GLM-4 Flash
-    capabilities: [text-to-text]
-    max_input_tokens: 128000
-    max_output_tokens: 8192
+    reference_pricing:
+      input_usd_per_1m: 0.7
+      output_usd_per_1m: 2.2
+      source: "https://docs.z.ai/guides/overview/pricing"
+      updated: "2026-09"
+  - id: glm-5.3-flash
+    label: GLM-5.3 Flash
+    capabilities: [text-to-text, code, long-context, low-cost]
+    max_input_tokens: 1310720
     mode: chat
-  - id: glm-4.5-flash
-    label: GLM-4.5 Flash
-    capabilities: [text-to-text]
-    max_input_tokens: 128000
-    max_output_tokens: 8192
+    reference_pricing:
+      input_usd_per_1m: 0.075
+      output_usd_per_1m: 0.25
+      source: "https://docs.z.ai/guides/overview/pricing"
+      updated: "2026-09"
+  - id: glm-5.2
+    label: GLM-5.2
+    capabilities: [text-to-text, code, long-context, reasoning]
+    max_input_tokens: 1048576
     mode: chat
+    reference_pricing:
+      input_usd_per_1m: 0.61
+      output_usd_per_1m: 1.98
+      source: "https://docs.z.ai/guides/overview/pricing"
+      updated: "2026-09"
+  - id: glm-5
+    label: GLM-5
+    capabilities: [text-to-text, long-context, reasoning]
+    max_input_tokens: 204800
+    mode: chat
+    reference_pricing:
+      input_usd_per_1m: 0.6
+      output_usd_per_1m: 1.92
+      source: "https://docs.z.ai/guides/overview/pricing"
+      updated: "2026-09"
+  - id: glm-4.7
+    label: GLM-4.7
+    capabilities: [text-to-text, long-context, reasoning]
+    max_input_tokens: 204800
+    mode: chat
+    reference_pricing:
+      input_usd_per_1m: 0.4
+      output_usd_per_1m: 1.75
+      source: "https://docs.z.ai/guides/overview/pricing"
+      updated: "2026-09"
+  - id: glm-4.7-flash
+    label: GLM-4.7 Flash
+    capabilities: [text-to-text, low-cost]
+    max_input_tokens: 202752
+    mode: chat
+    reference_pricing:
+      input_usd_per_1m: 0.06
+      output_usd_per_1m: 0.4
+      source: "https://docs.z.ai/guides/overview/pricing"
+      updated: "2026-09"
+  - id: glm-5v-turbo
+    label: GLM-5V Turbo
+    capabilities: [text-to-text, vision, multimodal, long-context]
+    max_input_tokens: 204800
+    mode: chat
+    reference_pricing:
+      input_usd_per_1m: 1.2
+      output_usd_per_1m: 4.0
+      source: "https://docs.z.ai/guides/overview/pricing"
+      updated: "2026-09"

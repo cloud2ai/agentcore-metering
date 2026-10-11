@@ -4,7 +4,7 @@ Capability labels, mode mapping, provider/model lists, and reference pricing. Us
 
 ## Price update time
 
-Reference prices in `providers/*.yaml` were last updated: **2026-02**. Consider updating periodically from provider docs or [LLM Stats](https://llm-stats.com/).
+Reference prices in `providers/*.yaml` were last updated: **2026-09**. Consider updating periodically from provider docs or [LLM Stats](https://llm-stats.com/).
 
 ## Reference pricing (schema)
 

@@ -1,31 +1,67 @@
 id: mistral
 label: Mistral
 default_api_base: "https://api.mistral.ai/v1"
-default_model: mistral-tiny
+default_model: mistral-small-4
 settings_key: MISTRAL_CONFIG
 requires_api_base: false
 models:
-  - id: mistral-large-latest
-    label: Mistral Large
-    capabilities: [text-to-text]
-    max_input_tokens: 128000
-    max_output_tokens: 8192
+  - id: mistral-large-3
+    label: Mistral Large 3
+    capabilities: [text-to-text, vision, code, multimodal, long-context]
+    max_input_tokens: 262144
     mode: chat
-  - id: mistral-small-latest
-    label: Mistral Small
-    capabilities: [text-to-text]
-    max_input_tokens: 128000
-    max_output_tokens: 8192
+    reference_pricing:
+      input_usd_per_1m: 0.5
+      output_usd_per_1m: 1.5
+      source: "https://mistral.ai/pricing"
+      updated: "2026-09"
+  - id: mistral-medium-3.5
+    label: Mistral Medium 3.5
+    capabilities: [text-to-text, vision, long-context]
+    max_input_tokens: 262144
     mode: chat
-  - id: mistral-tiny
-    label: Mistral Tiny
-    capabilities: [text-to-text]
-    max_input_tokens: 128000
-    max_output_tokens: 8192
+    reference_pricing:
+      input_usd_per_1m: 1.5
+      output_usd_per_1m: 7.5
+      source: "https://mistral.ai/pricing"
+      updated: "2026-09"
+  - id: mistral-small-4
+    label: Mistral Small 4
+    capabilities: [text-to-text, vision, long-context, low-cost]
+    max_input_tokens: 262144
+    mode: chat
+    reference_pricing:
+      input_usd_per_1m: 0.15
+      output_usd_per_1m: 0.6
+      source: "https://mistral.ai/pricing"
+      updated: "2026-09"
+  - id: ministral-3-14b
+    label: Ministral 3 14B
+    capabilities: [text-to-text, vision, low-cost]
+    max_input_tokens: 262144
+    mode: chat
+    reference_pricing:
+      input_usd_per_1m: 0.2
+      output_usd_per_1m: 0.2
+      source: "https://mistral.ai/pricing"
+      updated: "2026-09"
+  - id: ministral-3-8b
+    label: Ministral 3 8B
+    capabilities: [text-to-text, low-cost]
+    max_input_tokens: 262144
+    mode: chat
+    reference_pricing:
+      input_usd_per_1m: 0.15
+      output_usd_per_1m: 0.15
+      source: "https://mistral.ai/pricing"
+      updated: "2026-09"
+  - id: devstral-2-2512
+    label: Devstral 2
+    capabilities: [text-to-text, code, long-context]
+    max_input_tokens: 262144
     mode: chat
   - id: codestral-latest
     label: Codestral
-    capabilities: [text-to-text]
-    max_input_tokens: 128000
-    max_output_tokens: 8192
+    capabilities: [text-to-text, code]
+    max_input_tokens: 262144
     mode: chat

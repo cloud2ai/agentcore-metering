@@ -1,12 +1,13 @@
 import json
 
-from django.http import StreamingHttpResponse
+from django.http import Http404, StreamingHttpResponse
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.permissions import IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from agentcore_metering.adapters.django.models import LLMConfig
 from agentcore_metering.adapters.django.serializers import (
     ConfigTestResponseSerializer,
     LLMConfigWriteSerializer,
@@ -23,6 +24,25 @@ from agentcore_metering.adapters.django.services.runtime_config import (
     run_test_call_stream,
     validate_llm_config,
 )
+from agentcore_metering.adapters.django.views.config_management import (
+    _preserve_masked_secret_fields,
+)
+
+
+def _load_stored_config(config_uuid, config_id):
+    """Return the existing LLMConfig being tested, or None."""
+    qs = LLMConfig.objects.select_related("user")
+    if config_uuid:
+        try:
+            return qs.get(uuid=config_uuid)
+        except (LLMConfig.DoesNotExist, ValueError, TypeError):
+            return None
+    if config_id is not None:
+        try:
+            return qs.get(pk=config_id)
+        except (LLMConfig.DoesNotExist, ValueError, TypeError):
+            return None
+    return None
 
 
 class AdminLLMConfigTestView(APIView):
@@ -33,6 +53,11 @@ class AdminLLMConfigTestView(APIView):
     """
 
     permission_classes = [IsAdminUser]
+
+    def get_stored_config(self, request, data):
+        return _load_stored_config(
+            data.get("config_uuid"), data.get("config_id"),
+        )
 
     @extend_schema(
         tags=["llm-metering"],
@@ -58,6 +83,9 @@ class AdminLLMConfigTestView(APIView):
         data = ser.validated_data
         provider = (data.get("provider") or "openai").strip().lower()
         config = data.get("config") or {}
+        stored = self.get_stored_config(request, data)
+        if stored is not None:
+            config = _preserve_masked_secret_fields(stored.config or {}, config)
         if data.get("model_type") == "decision":
             from agentcore_metering.adapters.django.services.decisions import (
                 CONNECTION_QUESTIONS,
@@ -102,6 +130,21 @@ class UserLLMConfigTestView(AdminLLMConfigTestView):
     """Test caller-supplied credentials; never resolves another user's key."""
 
     permission_classes = [IsAuthenticated]
+
+    def get_stored_config(self, request, data):
+        if not data.get("config_uuid") and data.get("config_id") is None:
+            return None
+        query = user_model_configs(request.user, writable=True).filter(
+            is_active=True,
+        )
+        if data.get("config_uuid"):
+            query = query.filter(uuid=data["config_uuid"])
+        if data.get("config_id") is not None:
+            query = query.filter(pk=data["config_id"])
+        stored = query.first()
+        if stored is None:
+            raise Http404
+        return stored
 
 
 class AdminLLMConfigTestCallView(APIView):

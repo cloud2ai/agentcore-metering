@@ -282,6 +282,14 @@ class TestRuntimeConfigService:
             assert "num_retries" in provider_schema["editable_params"]
             assert provider_schema["default_num_retries"] == 3
 
+    def test_provider_schema_includes_openai_compatible(self):
+        schema = rc.get_provider_params_schema()
+
+        provider_schema = schema["providers"]["openai_compatible"]
+        assert provider_schema["required"] == ["api_key", "api_base"]
+        assert provider_schema["default_model"] is None
+        assert provider_schema["default_api_base"] is None
+
     def test_build_litellm_params_moonshot_uses_raw_model_id(self):
         params = rc.build_litellm_params_from_config(
             "moonshot",
@@ -350,7 +358,7 @@ class TestRuntimeConfigService:
 
         assert params["model"] == "openai/gpt-4o-mini"
 
-    def test_build_litellm_params_openai_compatible_keeps_raw_model(self):
+    def test_build_litellm_params_openai_compatible_prefixes_model(self):
         params = rc.build_litellm_params_from_config(
             "openai_compatible",
             {

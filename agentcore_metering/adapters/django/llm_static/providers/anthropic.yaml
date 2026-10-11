@@ -1,59 +1,77 @@
 id: anthropic
 label: Anthropic
 default_api_base: "https://api.anthropic.com"
-default_model: claude-3-5-haiku-20241022
+default_model: claude-haiku-4-5
 settings_key: ANTHROPIC_CONFIG
 requires_api_base: false
 models:
-  - id: claude-opus-4-6
-    label: Claude Opus 4.6
-    capabilities: [text-to-text, long-context]
-    max_input_tokens: 200000
-    max_output_tokens: 8192
+  - id: claude-opus-5
+    label: Claude Opus 5
+    capabilities: [text-to-text, vision, long-context, reasoning]
+    max_input_tokens: 1048576
     mode: chat
     reference_pricing:
       input_usd_per_1m: 5.0
       output_usd_per_1m: 25.0
-      source: "https://docs.anthropic.com/en/docs/about-claude/pricing"
-      updated: "2026-02"
+      source: "https://platform.claude.com/docs/en/about-claude/pricing"
+      updated: "2026-09"
+  - id: claude-fable-5-1
+    label: Claude Fable 5.1
+    capabilities: [text-to-text, vision, long-context, reasoning]
+    max_input_tokens: 1048576
+    mode: chat
+    reference_pricing:
+      input_usd_per_1m: 10.0
+      output_usd_per_1m: 50.0
+      source: "https://platform.claude.com/docs/en/about-claude/pricing"
+      updated: "2026-09"
+  - id: claude-opus-4-8
+    label: Claude Opus 4.8
+    capabilities: [text-to-text, vision, long-context, reasoning]
+    max_input_tokens: 1048576
+    mode: chat
+    reference_pricing:
+      input_usd_per_1m: 5.0
+      output_usd_per_1m: 25.0
+      source: "https://platform.claude.com/docs/en/about-claude/pricing"
+      updated: "2026-09"
+  - id: claude-opus-4-7
+    label: Claude Opus 4.7
+    capabilities: [text-to-text, vision, long-context, reasoning]
+    max_input_tokens: 1048576
+    mode: chat
+    reference_pricing:
+      input_usd_per_1m: 5.0
+      output_usd_per_1m: 25.0
+      source: "https://platform.claude.com/docs/en/about-claude/pricing"
+      updated: "2026-09"
+  - id: claude-sonnet-5
+    label: Claude Sonnet 5
+    capabilities: [text-to-text, vision, long-context, reasoning]
+    max_input_tokens: 1048576
+    mode: chat
+    reference_pricing:
+      input_usd_per_1m: 2.0
+      output_usd_per_1m: 10.0
+      source: "https://platform.claude.com/docs/en/about-claude/pricing"
+      updated: "2026-09"
   - id: claude-sonnet-4-6
     label: Claude Sonnet 4.6
-    capabilities: [text-to-text, long-context]
-    max_input_tokens: 200000
-    max_output_tokens: 8192
+    capabilities: [text-to-text, vision, long-context, reasoning]
+    max_input_tokens: 1048576
     mode: chat
     reference_pricing:
       input_usd_per_1m: 3.0
       output_usd_per_1m: 15.0
-      source: "https://docs.anthropic.com/en/docs/about-claude/pricing"
-      updated: "2026-02"
-  - id: claude-opus-4-5-20251101
-    label: Claude Opus 4.5
-    capabilities: [text-to-text, long-context]
+      source: "https://platform.claude.com/docs/en/about-claude/pricing"
+      updated: "2026-09"
+  - id: claude-haiku-4-5
+    label: Claude Haiku 4.5
+    capabilities: [text-to-text, vision, long-context, low-cost]
     max_input_tokens: 200000
-    max_output_tokens: 8192
     mode: chat
-  - id: claude-sonnet-4-5-20250929
-    label: Claude Sonnet 4.5
-    capabilities: [text-to-text, long-context]
-    max_input_tokens: 200000
-    max_output_tokens: 8192
-    mode: chat
-  - id: claude-sonnet-4-20250514
-    label: Claude Sonnet 4
-    capabilities: [text-to-text, long-context]
-    max_input_tokens: 200000
-    max_output_tokens: 8192
-    mode: chat
-  - id: claude-3-5-sonnet-20241022
-    label: Claude 3.5 Sonnet
-    capabilities: [text-to-text, long-context]
-    max_input_tokens: 200000
-    max_output_tokens: 8192
-    mode: chat
-  - id: claude-3-5-haiku-20241022
-    label: Claude 3.5 Haiku
-    capabilities: [text-to-text, long-context]
-    max_input_tokens: 200000
-    max_output_tokens: 8192
-    mode: chat
+    reference_pricing:
+      input_usd_per_1m: 1.0
+      output_usd_per_1m: 5.0
+      source: "https://platform.claude.com/docs/en/about-claude/pricing"
+      updated: "2026-09"
