@@ -8,5 +8,6 @@ long-context: Long Context
 low-cost: Low Cost
 embedding: Embedding
 reasoning: Reasoning
+decision: Decision
 speech-to-text: Speech-to-Text
 text-to-speech: Text-to-Speech

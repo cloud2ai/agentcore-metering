@@ -6,11 +6,14 @@ Paginated listing with filters (user_id, model, success, dates).
 import pytest
 from django.utils import timezone as django_tz
 
+from agentcore_metering.adapters.django.models import LLMUsage
+from agentcore_metering.adapters.django.serializers import (
+    LLMUsageItemSerializer,
+)
 from agentcore_metering.adapters.django.services.usage_list import (
     get_llm_usage_list,
     get_llm_usage_list_from_query,
 )
-from agentcore_metering.adapters.django.models import LLMUsage
 
 
 @pytest.mark.unit
@@ -37,6 +40,8 @@ class TestGetLlmUsageList:
             prompt_tokens=10,
             completion_tokens=20,
             total_tokens=30,
+            cached_tokens=4,
+            reasoning_tokens=7,
             success=True,
         )
         out = get_llm_usage_list(page=1, page_size=20)
@@ -47,6 +52,12 @@ class TestGetLlmUsageList:
         assert item["prompt_tokens"] == 10
         assert item["completion_tokens"] == 20
         assert item["total_tokens"] == 30
+        assert item["cached_tokens"] == 4
+        assert item["reasoning_tokens"] == 7
+        assert item["cost"] is None
+        serialized = LLMUsageItemSerializer(item).data
+        assert serialized["cached_tokens"] == 4
+        assert serialized["reasoning_tokens"] == 7
         assert item["success"] is True
         assert item["username"] == "u1"
         assert "id" in item

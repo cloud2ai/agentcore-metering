@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+import litellm
 from django.test import override_settings
 
 from agentcore_metering.adapters.django.models import LLMConfig, LLMUsage
@@ -422,10 +423,10 @@ class TestRuntimeConfigService:
         )
         response = _mock_completion_response()
         monkeypatch.setattr(
-            rc.litellm, "completion", lambda **kwargs: response
+            litellm, "completion", lambda **kwargs: response
         )
         monkeypatch.setattr(
-            rc,
+            litellm,
             "completion_cost",
             lambda completion_response: 0.123,
         )
@@ -449,7 +450,7 @@ class TestRuntimeConfigService:
         def _raise_auth_error(**kwargs):
             raise Exception("401 invalid_api_key")
 
-        monkeypatch.setattr(rc.litellm, "completion", _raise_auth_error)
+        monkeypatch.setattr(litellm, "completion", _raise_auth_error)
 
         ok, detail = rc.validate_llm_config(
             provider="openai",
@@ -497,11 +498,10 @@ class TestRuntimeConfigService:
         )
         response = _mock_completion_response(content="hello")
         monkeypatch.setattr(
-            rc.litellm, "completion", lambda **kwargs: response
+            litellm, "completion", lambda **kwargs: response
         )
         monkeypatch.setattr(
-            "agentcore_metering.adapters.django.trackers.llm_usage."
-            "completion_cost",
+            "litellm.completion_cost",
             lambda completion_response: 0.5,
         )
 
@@ -553,11 +553,10 @@ class TestRuntimeConfigService:
             choices=[choice], usage=usage, model="openai/gpt-4o-mini"
         )
         monkeypatch.setattr(
-            rc.litellm, "completion", lambda **kwargs: response
+            litellm, "completion", lambda **kwargs: response
         )
         monkeypatch.setattr(
-            "agentcore_metering.adapters.django.trackers.llm_usage."
-            "completion_cost",
+            "litellm.completion_cost",
             lambda completion_response: 0.5,
         )
 
@@ -597,11 +596,10 @@ class TestRuntimeConfigService:
         )
         response = _mock_completion_response(content="hello")
         monkeypatch.setattr(
-            rc.litellm, "completion", lambda **kwargs: response
+            litellm, "completion", lambda **kwargs: response
         )
         monkeypatch.setattr(
-            "agentcore_metering.adapters.django.trackers.llm_usage."
-            "completion_cost",
+            "litellm.completion_cost",
             lambda completion_response: 0.5,
         )
         caplog.set_level(logging.INFO, logger=rc.logger.name)
@@ -637,7 +635,7 @@ class TestRuntimeConfigService:
         )
         response = _mock_completion_response(content="")
         monkeypatch.setattr(
-            rc.litellm, "completion", lambda **kwargs: response
+            litellm, "completion", lambda **kwargs: response
         )
 
         ok, detail, usage = rc.run_test_call(
@@ -691,7 +689,7 @@ class TestRuntimeConfigService:
             model="gpt-5-nano-2025-08-07",
         )
         monkeypatch.setattr(
-            rc.litellm, "completion", lambda **kwargs: response
+            litellm, "completion", lambda **kwargs: response
         )
         caplog.set_level(logging.WARNING, logger=rc.logger.name)
 

@@ -1,5 +1,5 @@
 from drf_spectacular.utils import extend_schema
-from rest_framework.permissions import IsAdminUser
+from rest_framework.permissions import IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -9,6 +9,9 @@ from agentcore_metering.adapters.django.serializers import (
 )
 from agentcore_metering.adapters.django.services.model_catalog import (
     get_providers_with_models,
+)
+from agentcore_metering.adapters.django.services.model_info import (
+    catalog_model_info,
 )
 from agentcore_metering.adapters.django.services.runtime_config import (
     get_provider_params_schema,
@@ -62,7 +65,21 @@ class AdminLLMConfigModelsView(APIView):
         for prov in data.get("providers") or []:
             pid = prov.get("id")
             if pid:
+                for model in prov.get("models") or []:
+                    model["model_info"] = catalog_model_info(pid, model["id"])
                 prov["default_api_base"] = (
                     schema.get("providers") or {}
                 ).get(pid, {}).get("default_api_base")
         return Response(data)
+
+
+class UserLLMConfigProvidersView(AdminLLMConfigProvidersView):
+    """Public provider metadata; contains no saved configuration or secrets."""
+
+    permission_classes = (IsAuthenticated,)
+
+
+class UserLLMConfigModelsView(AdminLLMConfigModelsView):
+    """Read-only model directory; never returns saved keys or configs."""
+
+    permission_classes = (IsAuthenticated,)

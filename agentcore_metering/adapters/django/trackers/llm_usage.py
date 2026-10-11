@@ -93,9 +93,11 @@ def usage_dict_from_usage_obj(
     cached_tokens = 0
     reasoning_tokens = 0
     if usage_obj:
-        prompt_tokens = _safe_int(_read_field(usage_obj, "prompt_tokens", 0))
-        completion_tokens = _safe_int(
-            _read_field(usage_obj, "completion_tokens", 0)
+        prompt_tokens = _read_nested_int(
+            usage_obj, ("prompt_tokens", "input_tokens"), 0,
+        )
+        completion_tokens = _read_nested_int(
+            usage_obj, ("completion_tokens", "output_tokens"), 0,
         )
         total_tokens = (
             _safe_int(_read_field(usage_obj, "total_tokens", 0))
@@ -113,6 +115,7 @@ def usage_dict_from_usage_obj(
         if cached_tokens == 0:
             prompt_details = (
                 _read_field(usage_obj, "prompt_tokens_details", None)
+                or _read_field(usage_obj, "input_tokens_details", None)
                 or _read_field(usage_obj, "input_token_details", None)
             )
             cached_tokens = _read_nested_int(
@@ -130,6 +133,7 @@ def usage_dict_from_usage_obj(
                     "completion_tokens_details",
                     None,
                 )
+                or _read_field(usage_obj, "output_tokens_details", None)
                 or _read_field(usage_obj, "output_token_details", None)
             )
             reasoning_tokens = _read_nested_int(

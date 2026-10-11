@@ -11,6 +11,7 @@ import os
 import re
 import threading
 import time
+from functools import lru_cache
 from typing import Any, Dict, Optional
 from urllib.error import URLError
 from urllib.request import Request, urlopen
@@ -38,6 +39,12 @@ def _path(*parts: str) -> str:
 def _load_yaml(filename: str) -> Any:
     with open(_path(filename), encoding="utf-8") as f:
         return yaml.safe_load(f)
+
+
+@lru_cache(maxsize=1)
+def get_decision_providers() -> Dict[str, Any]:
+    """Curated decision metadata shared by validation and both settings UIs."""
+    return _load_yaml("decision_providers.yaml") or {}
 
 
 def get_capability_labels() -> Dict[str, str]:

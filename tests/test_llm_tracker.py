@@ -50,7 +50,7 @@ class TestCallAndTrackServiceReturnsNone:
     """
 
     @patch(
-        "agentcore_metering.adapters.django.trackers.llm.litellm"
+        "litellm.completion"
     )
     @patch(
         "agentcore_metering.adapters.django.trackers.llm.get_litellm_params"
@@ -61,7 +61,7 @@ class TestCallAndTrackServiceReturnsNone:
         mock_params.return_value = {
             "model": "gpt-4", "api_key": "sk-x", "messages": []
         }
-        mock_litellm.completion.return_value = None
+        mock_litellm.return_value = None
 
         with pytest.raises(ValueError) as exc_info:
             LLMTracker.call_and_track(
@@ -77,7 +77,7 @@ class TestCallAndTrackEmptyResponse:
     """
 
     @patch(
-        "agentcore_metering.adapters.django.trackers.llm.litellm"
+        "litellm.completion"
     )
     @patch(
         "agentcore_metering.adapters.django.trackers.llm.get_litellm_params"
@@ -90,7 +90,7 @@ class TestCallAndTrackEmptyResponse:
         msg.content = ""
         choice = MagicMock()
         choice.message = msg
-        mock_litellm.completion.return_value = MagicMock(
+        mock_litellm.return_value = MagicMock(
             choices=[choice],
             usage=MagicMock(
                 prompt_tokens=0,
@@ -111,7 +111,7 @@ class TestCallAndTrackEmptyResponse:
         "._save_usage_to_db"
     )
     @patch(
-        "agentcore_metering.adapters.django.trackers.llm.litellm"
+        "litellm.completion"
     )
     @patch(
         "agentcore_metering.adapters.django.trackers.llm.get_litellm_params"
@@ -129,7 +129,7 @@ class TestCallAndTrackEmptyResponse:
         choice = MagicMock()
         choice.message = msg
         choice.finish_reason = "stop"
-        mock_litellm.completion.return_value = MagicMock(
+        mock_litellm.return_value = MagicMock(
             choices=[choice],
             usage=MagicMock(
                 prompt_tokens=0, completion_tokens=0, total_tokens=0,
@@ -155,7 +155,7 @@ class TestCallAndTrackEmptyResponse:
         "._save_usage_to_db"
     )
     @patch(
-        "agentcore_metering.adapters.django.trackers.llm.litellm"
+        "litellm.completion"
     )
     @patch(
         "agentcore_metering.adapters.django.trackers.llm.get_litellm_params"
@@ -170,7 +170,7 @@ class TestCallAndTrackEmptyResponse:
         choice = MagicMock()
         choice.message = msg
         choice.finish_reason = "length"
-        mock_litellm.completion.return_value = MagicMock(
+        mock_litellm.return_value = MagicMock(
             choices=[choice],
             usage=MagicMock(
                 prompt_tokens=0, completion_tokens=0, total_tokens=0,
@@ -534,7 +534,7 @@ class TestCallAndTrackUsageExtraction:
         "._save_usage_to_db"
     )
     @patch(
-        "agentcore_metering.adapters.django.trackers.llm.litellm"
+        "litellm.completion"
     )
     @patch(
         "agentcore_metering.adapters.django.trackers.llm.get_litellm_params"
@@ -554,7 +554,7 @@ class TestCallAndTrackUsageExtraction:
         )
         message = SimpleNamespace(content="ok")
         choice = SimpleNamespace(message=message)
-        mock_litellm.completion.return_value = SimpleNamespace(
+        mock_litellm.return_value = SimpleNamespace(
             choices=[choice],
             usage=usage,
             model="gpt-4",
@@ -577,7 +577,7 @@ class TestCallAndTrackUsageExtraction:
         "._save_usage_to_db"
     )
     @patch(
-        "agentcore_metering.adapters.django.trackers.llm.litellm"
+        "litellm.completion"
     )
     @patch(
         "agentcore_metering.adapters.django.trackers.llm.get_litellm_params"
@@ -593,7 +593,7 @@ class TestCallAndTrackUsageExtraction:
         )
         message = SimpleNamespace(content="ok")
         choice = SimpleNamespace(message=message)
-        mock_litellm.completion.return_value = SimpleNamespace(
+        mock_litellm.return_value = SimpleNamespace(
             choices=[choice],
             usage=usage,
             model="gpt-4",
@@ -610,7 +610,7 @@ class TestCallAndTrackUsageExtraction:
         assert save_kwargs["cost"] is None
 
     @patch(
-        "agentcore_metering.adapters.django.trackers.llm.litellm"
+        "litellm.completion"
     )
     @patch(
         "agentcore_metering.adapters.django.trackers.llm.get_litellm_params"
@@ -623,7 +623,7 @@ class TestCallAndTrackUsageExtraction:
         msg.content = "   \n  "
         choice = MagicMock()
         choice.message = msg
-        mock_litellm.completion.return_value = MagicMock(
+        mock_litellm.return_value = MagicMock(
             choices=[choice],
             usage=MagicMock(
                 prompt_tokens=0,
@@ -647,13 +647,13 @@ class TestCallAndTrackTokenFallback:
         "._save_usage_to_db"
     )
     @patch(
-        "agentcore_metering.adapters.django.trackers.llm.litellm"
+        "litellm.completion"
     )
     @patch(
         "agentcore_metering.adapters.django.trackers.llm.get_litellm_params"
     )
     @patch(
-        "agentcore_metering.adapters.django.trackers.llm_usage.token_counter"
+        "litellm.token_counter"
     )
     def test_sync_fallback_uses_token_counter_when_usage_is_zero(
         self, mock_token_counter, mock_params, mock_litellm, mock_save_usage
@@ -681,7 +681,7 @@ class TestCallAndTrackTokenFallback:
         )
         message = SimpleNamespace(content="hello")
         choice = SimpleNamespace(message=message)
-        mock_litellm.completion.return_value = SimpleNamespace(
+        mock_litellm.return_value = SimpleNamespace(
             choices=[choice],
             usage=usage,
             model="gpt-4",
@@ -706,13 +706,13 @@ class TestCallAndTrackTokenFallback:
         "._save_usage_to_db"
     )
     @patch(
-        "agentcore_metering.adapters.django.trackers.llm.litellm"
+        "litellm.completion"
     )
     @patch(
         "agentcore_metering.adapters.django.trackers.llm.get_litellm_params"
     )
     @patch(
-        "agentcore_metering.adapters.django.trackers.llm_usage.token_counter"
+        "litellm.token_counter"
     )
     def test_sync_fallback_guards_min_completion_token_when_token_counter_fails(
         self,
@@ -740,7 +740,7 @@ class TestCallAndTrackTokenFallback:
         )
         message = SimpleNamespace(content="hello")
         choice = SimpleNamespace(message=message)
-        mock_litellm.completion.return_value = SimpleNamespace(
+        mock_litellm.return_value = SimpleNamespace(
             choices=[choice],
             usage=usage,
             model="gpt-4",
@@ -989,7 +989,7 @@ class TestCallAndTrackStreaming:
         "._save_usage_to_db"
     )
     @patch(
-        "agentcore_metering.adapters.django.trackers.llm.litellm"
+        "litellm.completion"
     )
     @patch(
         "agentcore_metering.adapters.django.trackers.llm.get_litellm_params"
@@ -1011,7 +1011,7 @@ class TestCallAndTrackStreaming:
         chunk2 = SimpleNamespace(
             choices=[choice2], usage=usage_ns, model="gpt-4"
         )
-        mock_litellm.completion.return_value = iter([chunk1, chunk2])
+        mock_litellm.return_value = iter([chunk1, chunk2])
 
         gen = LLMTracker.call_and_track(
             messages=[{"role": "user", "content": "hi"}],
@@ -1133,13 +1133,13 @@ class TestCallAndTrackStreaming:
         "._save_usage_to_db"
     )
     @patch(
-        "agentcore_metering.adapters.django.trackers.llm.litellm"
+        "litellm.completion"
     )
     @patch(
         "agentcore_metering.adapters.django.trackers.llm.get_litellm_params"
     )
     @patch(
-        "agentcore_metering.adapters.django.trackers.llm_usage.token_counter"
+        "litellm.token_counter"
     )
     def test_stream_fallback_counts_tokens_from_streamed_content(
         self, mock_token_counter, mock_params, mock_litellm, mock_save_usage
@@ -1166,7 +1166,7 @@ class TestCallAndTrackStreaming:
         choice2 = SimpleNamespace(delta=delta2)
         chunk1 = SimpleNamespace(choices=[choice1], usage=None, model="gpt-4")
         chunk2 = SimpleNamespace(choices=[choice2], usage=None, model="gpt-4")
-        mock_litellm.completion.return_value = iter([chunk1, chunk2])
+        mock_litellm.return_value = iter([chunk1, chunk2])
 
         gen = LLMTracker.call_and_track(
             messages=[{"role": "user", "content": "hi"}],
@@ -1191,7 +1191,7 @@ class TestCallAndTrackStreaming:
         "._save_usage_to_db"
     )
     @patch(
-        "agentcore_metering.adapters.django.trackers.llm.litellm"
+        "litellm.completion"
     )
     @patch(
         "agentcore_metering.adapters.django.trackers.llm.get_litellm_params"
@@ -1221,7 +1221,7 @@ class TestCallAndTrackStreaming:
             )
             for d in deltas
         ]
-        mock_litellm.completion.return_value = iter(chunks)
+        mock_litellm.return_value = iter(chunks)
 
         gen = LLMTracker.call_and_track(
             messages=[{"role": "user", "content": "hi"}],

@@ -83,11 +83,10 @@ class TestAgioneModelString:
         params = build_litellm_params_from_config(
             "agione", _agione_config("openai/gpt-5.4-nano/d688d")
         )
-        # One "openai/" is the provider prefix LiteLLM strips, "responses/"
-        # selects the bridge, and the extra family segment survives to the
-        # gateway, which needs "openai/gpt-5.4-nano/d688d" verbatim.
+        # LiteLLM strips its provider and bridge marker. The configured
+        # model retains exactly one family segment at the gateway.
         assert params["model"] == (
-            "openai/responses/openai/openai/gpt-5.4-nano/d688d"
+            "openai/responses/openai/gpt-5.4-nano/d688d"
         )
         assert params["custom_llm_provider"] == "openai"
 
@@ -133,7 +132,7 @@ class TestValidateUsesProtocolModelString:
         [
             (
                 "openai/gpt-5.4-nano/d688d",
-                "openai/responses/openai/openai/gpt-5.4-nano/d688d",
+                "openai/responses/openai/gpt-5.4-nano/d688d",
                 "openai",
             ),
             (
@@ -175,6 +174,6 @@ class TestValidateUsesProtocolModelString:
         params = get_litellm_params()
 
         assert params["model"] == (
-            "openai/responses/openai/openai/gpt-5.4-nano/d688d"
+            "openai/responses/openai/gpt-5.4-nano/d688d"
         )
         assert params["custom_llm_provider"] == "openai"

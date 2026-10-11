@@ -7,6 +7,8 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Generator, Optional
 
+import httpx
+
 from agentcore_metering.constants import LITELLM_NUM_RETRIES
 
 logger = logging.getLogger(__name__)
@@ -60,6 +62,10 @@ def _status_code(exc: Exception) -> Optional[int]:
 
 def is_retryable_exception(exc: Exception) -> bool:
     """Return whether a provider failure is safe to retry."""
+    if isinstance(exc, (
+        httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError,
+    )):
+        return True
     type_name = type(exc).__name__
     if type_name in _PERMANENT_EXCEPTION_NAMES:
         return False

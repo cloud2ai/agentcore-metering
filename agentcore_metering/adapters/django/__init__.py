@@ -4,10 +4,15 @@
 # Lazy import so that importing this package does not load Django models before
 # django.setup() / apps are ready (avoids AppRegistryNotReady).
 
-__all__ = ["LLMTracker"]
+__all__ = ["LLMTracker", "DecisionTracker"]
 
 
 def __getattr__(name):
+    if name == "DecisionTracker":
+        from agentcore_metering.adapters.django.services.decisions import (
+            DecisionTracker,
+        )
+        return DecisionTracker
     if name == "LLMTracker":
         from agentcore_metering.adapters.django.trackers import LLMTracker
         return LLMTracker

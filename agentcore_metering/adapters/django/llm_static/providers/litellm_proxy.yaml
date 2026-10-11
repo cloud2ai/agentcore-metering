@@ -1,0 +1,6 @@
+id: litellm_proxy
+label: LiteLLM Gateway (Decisions)
+default_api_base: ""
+default_model: ""
+requires_api_base: true
+models: []
