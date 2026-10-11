@@ -3,7 +3,7 @@ import json
 from django.http import StreamingHttpResponse
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
-from rest_framework.permissions import IsAdminUser
+from rest_framework.permissions import IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -12,6 +12,9 @@ from agentcore_metering.adapters.django.serializers import (
     LLMConfigWriteSerializer,
     TestCallRequestSerializer,
     TestCallResponseSerializer,
+)
+from agentcore_metering.adapters.django.services.config_access import (
+    user_model_configs,
 )
 from agentcore_metering.adapters.django.services.runtime_config import (
     VALIDATION_MESSAGE_IDS,
@@ -55,6 +58,34 @@ class AdminLLMConfigTestView(APIView):
         data = ser.validated_data
         provider = (data.get("provider") or "openai").strip().lower()
         config = data.get("config") or {}
+        if data.get("model_type") == "decision":
+            from agentcore_metering.adapters.django.services.decisions import (
+                CONNECTION_QUESTIONS,
+                DecisionTracker,
+                decision_error_detail,
+            )
+            try:
+                answers, _ = DecisionTracker.call_with_config(
+                    provider=provider, config=config,
+                    input="This is a connection test.",
+                    questions=CONNECTION_QUESTIONS,
+                    state={"user_id": request.user.pk,
+                           "node_name": "config_test"},
+                )
+                if answers[0]["type"] == "refusal":
+                    return Response({
+                        "ok": False, "detail": "Model refused the test."
+                    })
+                return Response({"ok": True})
+            except ValueError as exc:
+                return Response({"ok": False, "detail": str(exc)})
+            except Exception as exc:
+                return Response({
+                    "ok": False,
+                    "detail": decision_error_detail(
+                        exc, getattr(request, "LANGUAGE_CODE", "en")
+                    ),
+                })
         ok, message = validate_llm_config(provider, config, user=request.user)
         if ok:
             return Response({"ok": True})
@@ -67,6 +98,12 @@ class AdminLLMConfigTestView(APIView):
         )
 
 
+class UserLLMConfigTestView(AdminLLMConfigTestView):
+    """Test caller-supplied credentials; never resolves another user's key."""
+
+    permission_classes = [IsAuthenticated]
+
+
 class AdminLLMConfigTestCallView(APIView):
     """
     POST: Run one completion with a saved LLMConfig and record to LLMUsage.
@@ -77,6 +114,10 @@ class AdminLLMConfigTestCallView(APIView):
     """
 
     permission_classes = [IsAdminUser]
+    node_name = "admin_test_call"
+
+    def can_test(self, request, data):
+        return True
 
     @extend_schema(
         tags=["llm-metering"],
@@ -97,6 +138,8 @@ class AdminLLMConfigTestCallView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         data = ser.validated_data
+        if not self.can_test(request, data):
+            return Response({"detail": "Not found."}, status=404)
         config_uuid = data.get("config_uuid")
         config_id = data.get("config_id")
         prompt = (data.get("prompt") or "").strip()
@@ -110,6 +153,7 @@ class AdminLLMConfigTestCallView(APIView):
                 prompt=prompt,
                 user=request.user,
                 max_tokens=max_tokens,
+                node_name=self.node_name,
             )
             if ok:
                 return Response({
@@ -129,6 +173,7 @@ class AdminLLMConfigTestCallView(APIView):
                 prompt=prompt,
                 user=request.user,
                 max_tokens=max_tokens,
+                node_name=self.node_name,
             )
         except ValueError as e:
             return Response({
@@ -171,3 +216,22 @@ class AdminLLMConfigTestCallView(APIView):
         response["Cache-Control"] = "no-cache"
         response["X-Accel-Buffering"] = "no"
         return response
+
+
+class UserLLMConfigTestCallView(AdminLLMConfigTestCallView):
+    """Test active personal chat models; shared keys require staff access."""
+
+    permission_classes = [IsAuthenticated]
+    node_name = "user_test_call"
+
+    def can_test(self, request, data):
+        query = user_model_configs(request.user, writable=True).filter(
+            model_type="llm", is_active=True,
+        )
+        if data.get("config_uuid"):
+            # Runtime helpers support legacy ID fallback. Both selectors
+            # must identify the authorized row, even if it is later deleted.
+            if data.get("config_id") is not None:
+                query = query.filter(pk=data["config_id"])
+            return query.filter(uuid=data["config_uuid"]).exists()
+        return query.filter(pk=data["config_id"]).exists()

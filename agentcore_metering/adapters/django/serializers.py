@@ -5,9 +5,20 @@ Includes read/write serializers for LLM config and response serializers
 for OpenAPI/Swagger documentation (token stats, usage list, errors).
 """
 
+from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
+from agentcore_metering.adapters.django.llm_static.load import (
+    get_decision_providers,
+)
 from agentcore_metering.adapters.django.models import LLMConfig
+from agentcore_metering.adapters.django.services.model_info import (
+    INPUT_MODALITIES,
+    OUTPUT_MODALITIES,
+    reset_model_info_on_change,
+    resolve_model_info,
+    validate_model_info,
+)
 
 
 def _mask_secrets(config: dict) -> dict:
@@ -27,12 +38,37 @@ def _mask_secrets(config: dict) -> dict:
     return out
 
 
+class ModelInfoSerializer(serializers.Serializer):
+    """Known input/output modalities; null means unknown, not unsupported."""
+
+    supported_modalities = serializers.ListField(
+        child=serializers.ChoiceField(choices=INPUT_MODALITIES),
+        allow_null=True,
+    )
+    supported_output_modalities = serializers.ListField(
+        child=serializers.ChoiceField(choices=OUTPUT_MODALITIES),
+        allow_null=True,
+    )
+    sources = serializers.DictField(
+        child=serializers.ChoiceField(
+            choices=("catalog", "manual", "unknown"),
+        ),
+        required=False,
+    )
+
+
 class LLMConfigSerializer(serializers.ModelSerializer):
     """
     Read LLM config. On read, api_key (and key) in config are masked.
     is_default is True when this config is the default (earliest enabled
     global config by created_at); frontend can use it to show the default.
     """
+
+    model_info = serializers.SerializerMethodField()
+
+    @extend_schema_field(ModelInfoSerializer)
+    def get_model_info(self, instance):
+        return resolve_model_info(instance.provider, instance.config)
 
     is_default = serializers.BooleanField(
         read_only=True,
@@ -53,6 +89,7 @@ class LLMConfigSerializer(serializers.ModelSerializer):
             "model_type",
             "provider",
             "config",
+            "model_info",
             "is_active",
             "is_default",
             "created_at",
@@ -85,6 +122,10 @@ class LLMConfigWriteSerializer(serializers.Serializer):
     Payload for creating/updating LLM config: provider + single config dict.
     """
 
+    model_type = serializers.ChoiceField(
+        choices=LLMConfig.MODEL_TYPES, required=False,
+        help_text="decision uses LiteLLM Decisions, not chat completions.",
+    )
     provider = serializers.CharField(
         default="openai",
         max_length=50,
@@ -100,6 +141,9 @@ class LLMConfigWriteSerializer(serializers.Serializer):
             "Provider-specific config: api_key (required for most), model, "
             "api_base, deployment (Azure), max_tokens, temperature, top_p, "
             "request_timeout_seconds, num_retries, api_version (Azure). "
+            "Optional model_info contains supported_modalities and "
+            "supported_output_modalities overrides; {} restores automatic "
+            "detection. Omit model_info to preserve it on update. "
             "Use GET "
             ".../llm-config/providers/ for per-provider required/optional "
             "keys."
@@ -119,6 +163,86 @@ class LLMConfigWriteSerializer(serializers.Serializer):
         ),
     )
 
+    def validate_config(self, value):
+        if not isinstance(value, dict):
+            raise serializers.ValidationError("config must be an object.")
+        model = value.get("model")
+        if model is not None and not isinstance(model, str):
+            raise serializers.ValidationError({
+                "model": "model must be a string or null."
+            })
+        if "model_info" in value:
+            value = dict(value)
+            try:
+                value["model_info"] = validate_model_info(value["model_info"])
+            except (ValueError, TypeError) as exc:
+                raise serializers.ValidationError({"model_info": str(exc)})
+        return value
+
+    def validate(self, attrs):
+        from agentcore_metering.adapters.django.services.decisions import (
+            decision_params,
+        )
+        from agentcore_metering.adapters.django.services.model_catalog import (
+            get_model_type_for_model_id,
+        )
+
+        instance = self.context.get("instance")
+        provider = attrs.get(
+            "provider", getattr(instance, "provider", "openai")
+        )
+        provider = provider.strip().lower()
+        if "provider" in attrs:
+            attrs["provider"] = provider
+        incoming = attrs.get("config", {})
+        if instance:
+            updated = reset_model_info_on_change(
+                instance.provider, instance.config, provider, incoming,
+            )
+            if updated is not incoming:
+                attrs["config"] = updated
+        config = {**(getattr(instance, "config", None) or {}),
+                  **attrs.get("config", {})}
+        inferred = get_model_type_for_model_id(provider, config.get("model"))
+        existing_type = getattr(instance, "model_type", None)
+        model_type = attrs.get("model_type")
+        if not model_type:
+            identity_unchanged = instance and (
+                provider == instance.provider
+                and config.get("model") == (instance.config or {}).get("model")
+            )
+            if existing_type == "decision":
+                model_type = existing_type
+            elif identity_unchanged or (instance and not config.get("model")):
+                model_type = existing_type
+            else:
+                model_type = inferred
+        if (
+            instance and model_type != existing_type
+            and "decision" in (model_type, existing_type)
+        ):
+            raise serializers.ValidationError({
+                "model_type": "Create a new config to change model type."
+            })
+        decision_only = set(get_decision_providers()) - {
+            "openai", "openrouter", "openai_compatible",
+        }
+        if provider in decision_only and model_type != "decision":
+            raise serializers.ValidationError({
+                "model_type": "This provider requires decision model type."
+            })
+        if model_type == "decision":
+            try:
+                decision_params(provider, config)
+            except (ValueError, TypeError) as exc:
+                raise serializers.ValidationError({"config": str(exc)})
+        if model_type != "llm" and attrs.get("is_default"):
+            raise serializers.ValidationError({
+                "is_default": "Only chat models can be the default LLM."
+            })
+        attrs["model_type"] = model_type
+        return attrs
+
 
 class ErrorDetailSerializer(serializers.Serializer):
     """Standard error body for 400/404 responses in API docs."""
@@ -127,6 +251,38 @@ class ErrorDetailSerializer(serializers.Serializer):
         allow_blank=True,
         help_text="Human-readable error message.",
     )
+
+
+class DecisionTestRequestSerializer(serializers.Serializer):
+    config_uuid = serializers.UUIDField(required=False)
+    provider = serializers.ChoiceField(
+        choices=tuple(get_decision_providers()),
+        default="litellm_proxy",
+    )
+    config = serializers.DictField(required=False)
+    input = serializers.CharField(allow_blank=False, max_length=500000)
+    questions = serializers.ListField(
+        child=serializers.DictField(), min_length=1, max_length=128,
+    )
+    stream = serializers.BooleanField(required=False, default=False)
+
+    def validate(self, attrs):
+        from agentcore_metering.adapters.django.services.decisions import (
+            decision_params,
+            validate_questions,
+        )
+
+        if attrs["stream"]:
+            raise serializers.ValidationError(
+                "Decisions do not support streaming."
+            )
+        try:
+            validate_questions(attrs["questions"])
+            if not attrs.get("config_uuid"):
+                decision_params(attrs["provider"], attrs.get("config") or {})
+        except ValueError as exc:
+            raise serializers.ValidationError(str(exc))
+        return attrs
 
 
 class TokenStatsSummarySerializer(serializers.Serializer):
@@ -302,6 +458,8 @@ class LLMUsageItemSerializer(serializers.Serializer):
     prompt_tokens = serializers.IntegerField(allow_null=True)
     completion_tokens = serializers.IntegerField(allow_null=True)
     total_tokens = serializers.IntegerField(allow_null=True)
+    cached_tokens = serializers.IntegerField(allow_null=True)
+    reasoning_tokens = serializers.IntegerField(allow_null=True)
     cost = serializers.FloatField(allow_null=True)
     cost_currency = serializers.CharField(allow_null=True)
     success = serializers.BooleanField()
@@ -459,6 +617,13 @@ class ProviderParamSchemaEntrySerializer(serializers.Serializer):
         required=False,
         help_text="Default retries after the initial provider attempt",
     )
+    model_types = serializers.ListField(
+        child=serializers.CharField(), required=False,
+    )
+    decision = serializers.DictField(
+        required=False,
+        help_text="Decision-specific credentials, defaults and model choices.",
+    )
 
 
 class ProvidersResponseSerializer(serializers.Serializer):
@@ -484,6 +649,9 @@ class ModelEntrySerializer(serializers.Serializer):
     """One model under a provider in GET .../llm-config/models/."""
 
     id = serializers.CharField(help_text="Model id (e.g. gpt-4o-mini)")
+    label = serializers.CharField(required=False)
+    mode = serializers.CharField(required=False)
+    model_info = ModelInfoSerializer(required=False)
     name = serializers.CharField(allow_null=True, required=False)
     capabilities = ModelCapabilitySerializer(many=True, required=False)
 
@@ -492,9 +660,13 @@ class ProviderModelsEntrySerializer(serializers.Serializer):
     """One provider block in GET .../llm-config/models/."""
 
     id = serializers.CharField(help_text="Provider id")
+    label = serializers.CharField(required=False)
     name = serializers.CharField(allow_null=True, required=False)
     models = ModelEntrySerializer(many=True)
     default_api_base = serializers.CharField(allow_null=True, required=False)
+    model_types = serializers.ListField(
+        child=serializers.CharField(), required=False,
+    )
 
 
 class ModelsResponseSerializer(serializers.Serializer):

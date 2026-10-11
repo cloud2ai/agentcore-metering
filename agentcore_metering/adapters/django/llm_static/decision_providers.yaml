@@ -1,0 +1,47 @@
+# Providers supported by LiteLLM 1.104.2 Decisions API.
+# https://docs.litellm.ai/docs/decisions
+typesafe:
+  label: TypeSafe (Jev)
+  default_model: jev-latest
+  default_api_base: https://api.typesafe.ai
+  models: [jev-latest, jev-1.13]
+cloudflare:
+  label: Cloudflare (Clef)
+  default_model: clef-flash
+  default_api_base: ""
+  requires_account_id: true
+  models: [clef-flash, clef]
+perplexity:
+  label: Perplexity
+  default_model: pplx-decider-v1-27b
+  default_api_base: https://api.perplexity.ai
+  models: [pplx-decider-v1-27b]
+openai:
+  label: OpenAI
+  default_model: gpt-6-luna
+  default_api_base: https://api.openai.com/v1
+  models: [gpt-6-luna]
+openrouter:
+  label: OpenRouter
+  default_model: typesafe/jev-1.13
+  default_api_base: https://openrouter.ai/api
+  models: [typesafe/jev-1.13]
+strands_decider:
+  label: Strands Decider
+  default_model: strands-decider-2B-hobson-v19
+  default_api_base: ""
+  requires_api_base: true
+  api_key_required: false
+  models: [strands-decider-2B-hobson-v19]
+litellm_proxy:
+  label: LiteLLM Gateway (Decisions)
+  default_model: ""
+  default_api_base: ""
+  requires_api_base: true
+  models: []
+openai_compatible:
+  label: OpenAI Compatible (Decisions)
+  default_model: ""
+  default_api_base: ""
+  requires_api_base: true
+  models: []

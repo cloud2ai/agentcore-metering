@@ -2,6 +2,7 @@
 provider_ids:
   - openai
   - openai_compatible
+  - litellm_proxy
   - azure_openai
   - gemini
   - anthropic

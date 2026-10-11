@@ -6,6 +6,10 @@ Include under an admin prefix, e.g.:
 """
 from django.urls import path
 
+from agentcore_metering.adapters.django.views.decisions import (
+    AdminDecisionTestView,
+)
+
 from agentcore_metering.adapters.django.views import (
     AdminLLMConfigAllListView,
     MeteringConfigAPIView,
@@ -25,6 +29,10 @@ from agentcore_metering.adapters.django.views import (
 app_name = "agentcore_metering"
 
 urlpatterns = [
+    path(
+        "llm-config/decision-test",
+        AdminDecisionTestView.as_view(), name="llm-config-decision-test",
+    ),
     path("users/", AdminUsersListView.as_view(), name="users"),
     path(
         "metering-config/",

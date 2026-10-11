@@ -10,6 +10,7 @@ from typing import Any, Dict, Optional
 from django.conf import settings
 
 from agentcore_metering.adapters.django.llm_static.load import (
+    get_decision_providers,
     get_provider_defaults,
 )
 from agentcore_metering.constants import (
@@ -364,4 +365,25 @@ def get_provider_params_schema() -> Dict[str, Any]:
             "default_max_tokens": OFFICIAL_DEFAULT_MAX_TOKENS.get(p),
             "default_num_retries": LITELLM_NUM_RETRIES,
         }
+    for pid, definition in get_decision_providers().items():
+        required = ["model"]
+        if definition.get("api_key_required", True):
+            required.append("api_key")
+        if definition.get("requires_api_base"):
+            required.append("api_base")
+        if definition.get("requires_account_id"):
+            required.append("account_id")
+        decision = {
+            **definition,
+            "required": required,
+            "optional": ["api_base", "request_timeout_seconds", "num_retries"],
+            "editable_params": [
+                "api_key", "api_base", "model", "account_id",
+                "request_timeout_seconds", "num_retries",
+            ],
+            "default_num_retries": LITELLM_NUM_RETRIES,
+        }
+        if pid not in providers:
+            providers[pid] = {**decision, "model_types": ["decision"]}
+        providers[pid]["decision"] = decision
     return {"providers": providers}

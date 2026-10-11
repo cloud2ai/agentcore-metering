@@ -1,5 +1,8 @@
 # Agentcore Metering
 
+支持通过 LiteLLM SDK 或网关统一配置 Jev、Cloudflare Clef 等决策模型，提供独立调用入口与用量计量。
+详见[决策模型配置与调用](docs/decisions.md)。
+
 [English](README.md)
 
 面向 Django 项目的 AI 调用与统计统一模块。
@@ -131,7 +134,7 @@ pytest tests -v
 
 - **POST/PUT body**
   - `provider`（默认 `openai`）
-  - `config`（单层 JSON，如 `api_key`、`model`、`api_base`、`deployment`、`max_tokens`、`temperature`、`top_p`、`request_timeout_seconds`、`num_retries`）
+  - `config`（JSON 对象，如 `api_key`、`model`、`api_base`、`deployment`、`max_tokens`、`temperature`、`top_p`、`request_timeout_seconds`、`num_retries`）
   - `num_retries` 默认值为 `3`，设为 `0` 可禁用重试；所有尝试共享同一个 `request_timeout_seconds` 超时预算
   - 创建/列表管理场景可额外传 `scope`、`user_id`、`is_active`、可选 `model_type`
   - 必填/可选键因提供商而异（如 Azure 需 `api_base`、`deployment`）
@@ -141,6 +144,21 @@ pytest tests -v
 - **GET `.../llm-config/providers/`**
   - 返回格式：`{ "providers": { "<provider>": { "required": [...], "optional": [...], "editable_params": [...], "default_model": "...", "default_api_base": "..." } } }`
   - 用于渲染按提供商区分的表单与占位符
+
+- **输入与输出能力元数据**
+  - 手动设置存储在 `config.model_info`，例如：
+    `{"supported_modalities": ["text", "image"], "supported_output_modalities": ["text"]}`。
+  - 输入支持 `text`、`image`、`audio`、`video`；输出还支持 `code`。
+    数组不能为空；这些字段只是元数据，不会传给模型服务。
+  - 更新时不传 `model_info` 保留原设置；传入则替换整个覆盖对象。
+    `{}` 或 `null` 恢复全部自动识别；对象内省略某一方向则该方向恢复自动识别。
+  - 更换提供商或模型时，如果没有提供新的能力设置，则清除旧模型的手动标记。
+  - 配置读取响应新增顶层 `model_info`，返回识别后的能力以及各方向的
+    `sources`：`manual`、`catalog`、`unknown`。未知用 `null` 表示，
+    不等于不支持。目录展示的是已记录的能力，不保证自定义网关全部支持。
+  - 自动识别读取本地 LiteLLM 注册表和模型目录，不调用模型服务；手动配置优先。
+  - 已登录用户可通过 `/api/v1/user/llm-config/models` 获取目录，
+    不会返回任何已保存的模型配置或密钥。
 
 - **POST `.../llm-config/test/`**
   - body：`provider`、`config`（与 PUT 同）

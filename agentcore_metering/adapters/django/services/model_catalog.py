@@ -18,11 +18,15 @@ Data is loaded from YAML under adapters/django/llm_static/
 (capability_labels.yaml, mode_to_model_type.yaml, providers/*.yaml).
 See llm_static/load.py.
 """
+from copy import deepcopy
 from typing import Any, Dict
 
 from agentcore_metering.adapters.django.llm_static.load import (
     get_capability_labels,
+    get_decision_providers,
     get_mode_to_model_type,
+)
+from agentcore_metering.adapters.django.llm_static.load import (
     get_providers_with_models as _load_providers_with_models,
 )
 
@@ -35,7 +39,28 @@ def get_providers_with_models() -> Dict[str, Any]:
     Return provider list and per-provider model list with capability tags.
     Used by GET llm-config/models/ and for deriving model_type from model id.
     """
-    return _load_providers_with_models()
+    data = deepcopy(_load_providers_with_models())
+    providers = {p["id"]: p for p in data["providers"]}
+    for pid, config in get_decision_providers().items():
+        if pid not in providers:
+            providers[pid] = {
+                "id": pid, "label": config["label"], "models": [],
+            }
+            data["providers"].append(providers[pid])
+        provider = providers[pid]
+        provider["model_types"] = sorted({
+            MODE_TO_MODEL_TYPE.get(m.get("mode"), "llm")
+            for m in provider["models"]
+        } | {"decision"})
+        for model in config["models"]:
+            provider["models"] = [
+                m for m in provider["models"] if m["id"] != model
+            ]
+            provider["models"].append({
+                "id": model, "label": model, "mode": "decisions",
+                "capabilities": ["decision"],
+            })
+    return data
 
 
 def get_model_type_for_model_id(provider: str, model_id: str) -> str:
@@ -43,8 +68,15 @@ def get_model_type_for_model_id(provider: str, model_id: str) -> str:
     Derive LLMConfig.model_type (llm | embedding | image_generation) from
     provider and model id using curated model list. Default llm.
     """
-    data = get_providers_with_models()
+    # The augmented display catalog includes decision aliases on mixed
+    # providers. Legacy callers selecting those IDs still mean chat unless
+    # they explicitly select model_type=decision.
+    data = _load_providers_with_models()
     prov_key = (provider or "").strip().lower()
+    if prov_key in get_decision_providers() and prov_key not in (
+        "openai", "openrouter", "openai_compatible",
+    ):
+        return "decision"
     mid = (model_id or "").strip()
     for p in data["providers"]:
         if (p.get("id") or "").strip().lower() != prov_key:

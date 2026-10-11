@@ -16,7 +16,8 @@ from decimal import Decimal
 from typing import Any, Dict, Generator, Optional, Tuple
 
 from django.utils import timezone
-from django.utils.translation import activate, gettext as _
+from django.utils.translation import activate
+from django.utils.translation import gettext as _
 
 from agentcore_metering.adapters.django.models import LLMConfig, LLMUsage
 from agentcore_metering.adapters.django.services.config_source import (
@@ -26,7 +27,9 @@ from agentcore_metering.adapters.django.services.litellm_params import (
     _litellm_kwargs_from_config,
     _validate_config,
     build_litellm_params_from_config,
-    get_provider_params_schema,
+)
+from agentcore_metering.adapters.django.services.litellm_params import (
+    get_provider_params_schema as get_provider_params_schema,
 )
 from agentcore_metering.adapters.django.services.litellm_retry import (
     completion_with_retry,
@@ -384,6 +387,8 @@ def run_test_call(
     prompt: str,
     user: Any,
     max_tokens: int = 512,
+    *,
+    node_name: str = "admin_test_call",
 ) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
     """
     Run one completion with the given LLMConfig and record to LLMUsage.
@@ -420,7 +425,7 @@ def run_test_call(
         f"config_uuid={config_uuid_value} config_id={config_id_value}"
     )
     messages = [{"role": "user", "content": (prompt or "").strip()}]
-    state = {"node_name": "admin_test_call"}
+    state = {"node_name": node_name}
     if user is not None:
         state["user_id"] = getattr(user, "pk", None)
 
@@ -470,6 +475,8 @@ def run_test_call_stream(
     prompt: str,
     user: Any,
     max_tokens: int = 512,
+    *,
+    node_name: str = "admin_test_call",
 ) -> Generator[str, None, Optional[Dict[str, Any]]]:
     """
     Stream one completion with the given LLMConfig and record to LLMUsage.
@@ -505,7 +512,7 @@ def run_test_call_stream(
         f"config_uuid={config_uuid_value} config_id={config_id_value}"
     )
     messages = [{"role": "user", "content": (prompt or "").strip()}]
-    state = {"node_name": "admin_test_call"}
+    state = {"node_name": node_name}
     if user is not None:
         state["user_id"] = getattr(user, "pk", None)
 

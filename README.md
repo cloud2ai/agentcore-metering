@@ -5,6 +5,8 @@
 Unified module for AI service invocation and statistics in Django projects.
 
 - Uses **LiteLLM** for completion and cost metering.
+- Supports typed decision models (including Jev) via LiteLLM SDK or Gateway;
+  see [configuration, calls and metering](docs/decisions.md).
 - Stores cost as amount + currency (e.g. `cost`, `cost_currency`).
 - Uses USD as default cost currency from LiteLLM.
 
@@ -154,6 +156,24 @@ pytest tests -v
 - **GET `.../llm-config/providers/`**
   - returns `{ "providers": { "<provider>": { "required": [...], "optional": [...], "editable_params": [...], "default_model": "...", "default_api_base": "..." } } }`
   - use it to render provider-specific forms and placeholders
+
+- **Input/output capability metadata**
+  - Save manual overrides in `config.model_info`, for example
+    `{"supported_modalities": ["text", "image"], "supported_output_modalities": ["text"]}`.
+  - Input values: `text`, `image`, `audio`, `video`. Output also accepts `code`.
+    Arrays must be non-empty. These are metadata, never provider parameters.
+  - Omit `model_info` on update to preserve existing overrides. Supplying it
+    replaces the entire override object; `{}` or `null` restores automatic
+    detection. Omitting a direction inside the object restores that direction.
+  - Changing provider/model without new overrides clears the old overrides.
+  - Config read responses add top-level `model_info` with resolved modalities
+    and per-field `sources` (`manual`, `catalog`, `unknown`). Unknown is `null`,
+    not a claim that the capability is unsupported. Catalog lists carry known
+    capabilities, not an exhaustive guarantee for a configured gateway.
+  - Automatic detection reads the local LiteLLM registry and curated directory;
+    it does not call a model provider. Manual overrides take precedence.
+  - Authenticated users can read the directory at
+    `/api/v1/user/llm-config/models`; it exposes no saved configs or keys.
 
 - **POST `.../llm-config/test/`**
   - body: `provider`, `config` (same as PUT)

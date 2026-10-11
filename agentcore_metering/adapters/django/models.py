@@ -59,8 +59,8 @@ class LLMUsage(models.Model):
         help_text="Number of reasoning tokens (for o1 models)",
     )
     cost = models.DecimalField(
-        max_digits=12,
-        decimal_places=6,
+        max_digits=18,
+        decimal_places=12,
         null=True,
         blank=True,
         default=None,
@@ -184,8 +184,8 @@ class LLMUsageSeries(models.Model):
     total_reasoning_tokens = models.BigIntegerField(default=0)
 
     total_cost = models.DecimalField(
-        max_digits=12,
-        decimal_places=6,
+        max_digits=18,
+        decimal_places=12,
         null=True,
         blank=True,
     )
@@ -228,10 +228,12 @@ class LLMConfig(models.Model):
     MODEL_TYPE_LLM = "llm"
     MODEL_TYPE_EMBEDDING = "embedding"
     MODEL_TYPE_IMAGE_GENERATION = "image_generation"
+    MODEL_TYPE_DECISION = "decision"
     MODEL_TYPES = (
         MODEL_TYPE_LLM,
         MODEL_TYPE_EMBEDDING,
         MODEL_TYPE_IMAGE_GENERATION,
+        MODEL_TYPE_DECISION,
     )
 
     scope = models.CharField(

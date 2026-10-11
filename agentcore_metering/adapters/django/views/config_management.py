@@ -22,11 +22,19 @@ from agentcore_metering.adapters.django.services.config_source import (
     get_default_llm_config_uuid,
     set_default_llm_config,
 )
-from agentcore_metering.adapters.django.services.model_catalog import (
-    get_model_type_for_model_id,
+from agentcore_metering.adapters.django.services.model_info import (
+    reset_model_info_on_change,
 )
 
 User = get_user_model()
+
+
+def _filter_model_type(qs, request):
+    """Keep legacy lists chat-only unless a client requests another type."""
+    model_type = request.query_params.get("model_type", "llm")
+    if model_type == "all":
+        return qs
+    return qs.filter(model_type=model_type)
 
 
 def _preserve_masked_secret_fields(
@@ -92,10 +100,11 @@ class AdminLLMConfigAllListView(APIView):
         ).strip().lower()
         user_id_param = request.query_params.get("user_id")
         qs = (
-            LLMConfig.objects.filter(model_type=LLMConfig.MODEL_TYPE_LLM)
+            LLMConfig.objects.all()
             .select_related("user")
             .order_by("scope", "created_at", "id")
         )
+        qs = _filter_model_type(qs, request)
         if scope_param == "global":
             qs = qs.filter(scope=LLMConfig.Scope.GLOBAL)
         elif scope_param == "user":
@@ -130,10 +139,10 @@ class AdminLLMConfigGlobalView(APIView):
         qs = (
             LLMConfig.objects.filter(
                 scope=LLMConfig.Scope.GLOBAL,
-                model_type=LLMConfig.MODEL_TYPE_LLM,
             )
             .order_by("created_at", "id")
         )
+        qs = _filter_model_type(qs, request)
         ctx = {"default_config_uuid": get_default_llm_config_uuid()}
         return Response(
             LLMConfigSerializer(qs, many=True, context=ctx).data
@@ -156,16 +165,7 @@ class AdminLLMConfigGlobalView(APIView):
         data = ser.validated_data
         scope_raw = (request.data.get("scope") or "global").strip().lower()
         user_id_raw = request.data.get("user_id")
-        provider = (data.get("provider") or "openai").strip().lower()
-        config = data.get("config") or {}
-        model_id = (config.get("model") or "").strip()
-        model_type_raw = (
-            (request.data.get("model_type") or "").strip()
-            or get_model_type_for_model_id(provider, model_id or None)
-            or LLMConfig.MODEL_TYPE_LLM
-        )
-        if model_type_raw not in LLMConfig.MODEL_TYPES:
-            model_type_raw = LLMConfig.MODEL_TYPE_LLM
+        model_type_raw = data["model_type"]
         if scope_raw == "user" and user_id_raw is not None:
             user = None
             try:
@@ -244,7 +244,9 @@ class AdminLLMConfigDetailView(APIView):
                 {"detail": "Not found."},
                 status=status.HTTP_404_NOT_FOUND,
             )
-        ser = LLMConfigWriteSerializer(data=request.data, partial=True)
+        ser = LLMConfigWriteSerializer(
+            data=request.data, partial=True, context={"instance": obj}
+        )
         if not ser.is_valid():
             return Response(ser.errors, status=status.HTTP_400_BAD_REQUEST)
         data = ser.validated_data
@@ -256,27 +258,13 @@ class AdminLLMConfigDetailView(APIView):
             )
         if "is_active" in data:
             obj.is_active = data["is_active"]
+        obj.model_type = data["model_type"]
+        if obj.model_type != LLMConfig.MODEL_TYPE_LLM:
+            obj.is_default = False
         if "is_default" in data and obj.scope == LLMConfig.Scope.GLOBAL:
             obj.is_default = data["is_default"]
             if obj.is_default:
                 set_default_llm_config(obj)
-        model_type_raw = request.data.get("model_type")
-        mt_ok = (
-            model_type_raw is not None
-            and str(model_type_raw).strip() in LLMConfig.MODEL_TYPES
-        )
-        if mt_ok:
-            obj.model_type = str(model_type_raw).strip()
-        else:
-            provider = (
-                data.get("provider") or obj.provider or "openai"
-            ).strip().lower()
-            config = data.get("config") if "config" in data else obj.config
-            model_id = ((config or {}).get("model") or "").strip()
-            if model_id:
-                derived = get_model_type_for_model_id(provider, model_id)
-                if derived:
-                    obj.model_type = derived
         obj.save()
         ctx = {"default_config_uuid": get_default_llm_config_uuid()}
         return Response(LLMConfigSerializer(obj, context=ctx).data)
@@ -424,6 +412,11 @@ class AdminLLMConfigUserDetailView(APIView):
             user=user,
             model_type=LLMConfig.MODEL_TYPE_LLM,
         )
+        if data["model_type"] != LLMConfig.MODEL_TYPE_LLM:
+            return Response(
+                {"detail": "Use the config list API for non-chat models."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         if qs.count() > 1:
             return Response(
                 {
@@ -447,9 +440,13 @@ class AdminLLMConfigUserDetailView(APIView):
                 is_active=data.get("is_active", True),
             )
         else:
-            obj.provider = (data.get("provider") or "openai").strip().lower()
+            provider = (data.get("provider") or "openai").strip().lower()
+            config = reset_model_info_on_change(
+                obj.provider, obj.config, provider, data.get("config") or {},
+            )
+            obj.provider = provider
             obj.config = _preserve_masked_secret_fields(
-                obj.config or {}, data.get("config") or {}
+                obj.config or {}, config
             )
             if "is_active" in data:
                 obj.is_active = data["is_active"]

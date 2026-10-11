@@ -89,7 +89,10 @@ def set_default_llm_config(config: LLMConfig) -> None:
     Set this config as the default (is_default=True) and clear others.
     Only global LLM configs can be default; no-op for user scope.
     """
-    if config.scope != LLMConfig.Scope.GLOBAL:
+    if (
+        config.scope != LLMConfig.Scope.GLOBAL
+        or config.model_type != LLMConfig.MODEL_TYPE_LLM
+    ):
         return
     config.is_default = True
     config.save(update_fields=["is_default", "updated_at"])

@@ -99,6 +99,8 @@ def get_llm_usage_list(
             "prompt_tokens": u.prompt_tokens,
             "completion_tokens": u.completion_tokens,
             "total_tokens": u.total_tokens,
+            "cached_tokens": u.cached_tokens,
+            "reasoning_tokens": u.reasoning_tokens,
             "cost": cost,
             "cost_currency": u.cost_currency or "USD",
             "success": u.success,
