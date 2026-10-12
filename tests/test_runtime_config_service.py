@@ -2,8 +2,9 @@ import logging
 from types import SimpleNamespace
 from unittest.mock import patch
 
-import pytest
+import httpx
 import litellm
+import pytest
 from django.test import override_settings
 
 from agentcore_metering.adapters.django.models import LLMConfig, LLMUsage
@@ -725,3 +726,54 @@ def test_friendly_llm_exception_balance():
 
 def test_friendly_llm_exception_unknown_returns_none():
     assert rc.friendly_llm_exception(Exception("json decode error line 3")) is None
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        litellm.BadRequestError(
+            message=(
+                'TypesafeException - {"title":'
+                '"Typesafe is not available in your region.","status":451}'
+            ),
+            model="typesafe/jev-latest",
+            llm_provider="typesafe",
+        ),
+        httpx.HTTPStatusError(
+            "Access restricted",
+            request=httpx.Request("POST", "https://provider.example"),
+            response=httpx.Response(451),
+        ),
+        Exception("unsupported_country_region_territory"),
+        litellm.APIConnectionError(
+            message="TypesafeException - 451 Unavailable For Legal Reasons",
+            model="typesafe/jev-latest",
+            llm_provider="typesafe",
+        ),
+    ],
+)
+def test_classify_region_restriction(exc):
+    assert rc._user_friendly_validation_error(exc) == "region_restricted"
+
+
+def test_region_restriction_with_empty_message():
+    exc = Exception("")
+    exc.status_code = 451
+    assert rc._user_friendly_validation_error(exc) == "region_restricted"
+
+
+@pytest.mark.parametrize(
+    "message, expected",
+    [
+        ("Invalid API key (401)", "invalid_api_key"),
+        ("Insufficient Balance", "insufficient_balance"),
+        ("Quota exceeded (429)", "rate_limit"),
+        ("Model not found (404)", "not_found"),
+        ("Connection timed out", "timeout"),
+        ("Connection failed", "network_error"),
+        ("Permission denied (403)", "permission_denied"),
+        ("Invalid request with 451 input tokens", "unknown"),
+    ],
+)
+def test_existing_validation_classifications_unchanged(message, expected):
+    assert rc._user_friendly_validation_error(Exception(message)) == expected

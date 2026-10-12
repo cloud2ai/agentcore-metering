@@ -1,10 +1,11 @@
 """Decision configuration, gateway wire contract, and usage isolation."""
 
 from decimal import Decimal
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import httpx
 import pytest
+from django.test import override_settings
 
 from agentcore_metering.adapters.django import DecisionTracker
 from agentcore_metering.adapters.django.models import LLMConfig, LLMUsage
@@ -459,6 +460,66 @@ def test_empty_gateway_errors_have_actionable_details(exception, expected):
     assert decision_error_detail(exception) == get_validation_message(
         expected, "en"
     )
+
+
+@pytest.mark.parametrize(
+    "client_name, url",
+    [
+        ("admin_client", BASE + "test/"),
+        ("authenticated_client", "/api/v1/user/llm-config/test"),
+    ],
+)
+@pytest.mark.parametrize("language", ["en", "zh-hans"])
+@override_settings(
+    MIDDLEWARE=["django.middleware.locale.LocaleMiddleware"],
+    LANGUAGE_CODE="en",
+    LANGUAGES=[("en", "English"), ("zh-hans", "简体中文")],
+    USE_I18N=True,
+)
+def test_native_region_restriction_is_explained_in_config_test(
+    request, client_name, url, language,
+):
+    def post(url, **kwargs):
+        return httpx.Response(
+            451,
+            json={
+                "title": "Typesafe is not available in your region.",
+                "status": 451,
+            },
+            request=httpx.Request("POST", url),
+        )
+
+    with patch(
+        "litellm.decisions.main._get_httpx_client",
+        return_value=Mock(post=Mock(side_effect=post)),
+    ) as transport:
+        response = request.getfixturevalue(client_name).post(
+            url,
+            {
+                "model_type": "decision",
+                "provider": "typesafe",
+                "config": {
+                    "model": "jev-latest",
+                    "api_key": "private-test-key",
+                    "num_retries": 0,
+                },
+            },
+            format="json",
+            HTTP_ACCEPT_LANGUAGE=language,
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is False
+    transport.return_value.post.assert_called_once()
+    if language == "zh-hans":
+        assert "服务端网络出口地区" in body["detail"]
+    else:
+        assert "server's network region" in body["detail"]
+    assert "private-test-key" not in body["detail"]
+    assert "https://" not in body["detail"]
+    assert not LLMConfig.objects.exists()
+    assert LLMUsage.objects.get().success is False
 
 
 @pytest.mark.parametrize(
