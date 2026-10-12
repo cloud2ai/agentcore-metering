@@ -37,5 +37,8 @@ msgstr "无法连接服务，请检查 API 地址与网络。"
 msgid "Access denied. Check API key or account permissions."
 msgstr "无访问权限，请检查 API Key 与账号权限。"
 
+msgid "The model provider does not support access from the server's network region. Use a supported server region or another model provider."
+msgstr "当前服务端网络出口地区不受模型服务商支持，请使用受支持地区的服务端或其他模型服务商。"
+
 msgid "Connection test failed. Check your configuration and try again."
 msgstr "连接测试失败，请检查配置后重试。"

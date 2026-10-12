@@ -74,6 +74,11 @@ VALIDATION_MESSAGE_IDS: Dict[str, str] = {
     "permission_denied": (
         "Access denied. Check API key or account permissions."
     ),
+    "region_restricted": (
+        "The model provider does not support access from the server's "
+        "network region. Use a supported server region or another "
+        "model provider."
+    ),
     "unknown": (
         "Connection test failed. Check your configuration and try again."
     ),
@@ -103,6 +108,17 @@ def _user_friendly_validation_error(exc: Exception) -> str:
     msg = str(exc).strip()
     msg_lower = msg.lower()
     type_name = type(exc).__name__
+
+    response = getattr(exc, "response", None)
+    status_code = getattr(exc, "status_code", None)
+    if (
+        status_code == 451
+        or getattr(response, "status_code", None) == 451
+        or "451 unavailable for legal reasons" in msg_lower
+        or "not available in your region" in msg_lower
+        or "unsupported_country_region_territory" in msg_lower
+    ):
+        return "region_restricted"
 
     # Out-of-balance / arrears — providers word this differently (DeepSeek:
     # "Insufficient Balance"); check before the generic buckets.
