@@ -13,10 +13,22 @@ from agentcore_metering.adapters.django.views.config_validation import (
 from agentcore_metering.adapters.django.views.decisions import (
     UserDecisionTestView,
 )
+from agentcore_metering.adapters.django.views.fallback import (
+    UserModelFallbackView,
+    UserModelFallbackResetView,
+)
 
 app_name = "agentcore_metering_user"
 
 urlpatterns = [
+    path(
+        "llm-config/<uuid:config_uuid>/fallback/reset",
+        UserModelFallbackResetView.as_view(), name="fallback-reset",
+    ),
+    path(
+        "llm-config/<uuid:config_uuid>/fallback",
+        UserModelFallbackView.as_view(), name="fallback",
+    ),
     path(
         "llm-config/models", UserLLMConfigModelsView.as_view(), name="models",
     ),

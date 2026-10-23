@@ -90,6 +90,7 @@ class LLMConfigSerializer(serializers.ModelSerializer):
             "provider",
             "config",
             "model_info",
+            "fallback",
             "is_active",
             "is_default",
             "created_at",
@@ -99,6 +100,7 @@ class LLMConfigSerializer(serializers.ModelSerializer):
             "id",
             "uuid",
             "is_default",
+            "fallback",
             "created_at",
             "updated_at",
         ]

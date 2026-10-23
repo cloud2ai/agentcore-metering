@@ -36,11 +36,19 @@ def _get_earliest_active_configs(
     return list(qs)
 
 
+class ResolvedConfig(dict):
+    """Preserve the mapping contract with internal resolution metadata."""
+
+    def __init__(self, row):
+        super().__init__(
+            provider=(row.provider or "openai").strip().lower(),
+            config=row.config or {},
+        )
+        self.model_config = row
+
+
 def _config_to_dict(row: LLMConfig) -> Dict[str, Any]:
-    return {
-        "provider": (row.provider or "openai").strip().lower(),
-        "config": row.config or {},
-    }
+    return ResolvedConfig(row)
 
 
 def get_config_from_db(

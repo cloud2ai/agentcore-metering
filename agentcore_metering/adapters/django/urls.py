@@ -9,6 +9,10 @@ from django.urls import path
 from agentcore_metering.adapters.django.views.decisions import (
     AdminDecisionTestView,
 )
+from agentcore_metering.adapters.django.views.fallback import (
+    AdminModelFallbackView,
+    AdminModelFallbackResetView,
+)
 
 from agentcore_metering.adapters.django.views import (
     AdminLLMConfigAllListView,
@@ -29,6 +33,15 @@ from agentcore_metering.adapters.django.views import (
 app_name = "agentcore_metering"
 
 urlpatterns = [
+    path(
+        "llm-config/<uuid:config_uuid>/fallback/reset",
+        AdminModelFallbackResetView.as_view(),
+        name="llm-config-fallback-reset",
+    ),
+    path(
+        "llm-config/<uuid:config_uuid>/fallback",
+        AdminModelFallbackView.as_view(), name="llm-config-fallback",
+    ),
     path(
         "llm-config/decision-test",
         AdminDecisionTestView.as_view(), name="llm-config-decision-test",

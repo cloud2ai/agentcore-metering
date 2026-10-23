@@ -18,6 +18,18 @@ from agentcore_metering.adapters.django.services.litellm_params import (
 from agentcore_metering.adapters.django.services.litellm_retry import (
     completion_with_retry,
 )
+from agentcore_metering.adapters.django.services.fallback_runtime import (
+    current_attempt,
+    run_plan,
+)
+from agentcore_metering.adapters.django.services.decision_chat import (
+    chat_decision_params,
+    request_chat_decisions,
+    validate_chat_probabilities,
+)
+from agentcore_metering.adapters.django.services.model_fallback import (
+    EmptyResponseError,
+)
 from agentcore_metering.adapters.django.trackers.llm_usage import (
     get_cost_from_response,
     usage_dict_from_usage_obj,
@@ -299,7 +311,9 @@ class DecisionTracker:
     """Shared, non-streaming decision client; thresholds stay in callers."""
 
     @staticmethod
-    def call_and_track(*, input, questions, model_uuid, state=None):
+    def call_and_track(
+        *, input, questions, model_uuid, state=None, reasoning_effort=None,
+    ):
         state = dict(state or {})
         row = LLMConfig.objects.filter(
             uuid=model_uuid,
@@ -308,6 +322,26 @@ class DecisionTracker:
         ).first()
         if row is None:
             raise ValueError("Active decision model configuration not found.")
+        if row.fallback and current_attempt.get() is None:
+            def invoke(actual, timeout, health, target):
+                return DecisionTracker.call_with_config(
+                    provider=actual.provider, config=actual.config,
+                    input=input, questions=questions,
+                    state={**state, "metadata": dict(
+                        state.get("metadata") or {},
+                    )},
+                    config_uuid=str(actual.uuid), model_type=actual.model_type,
+                    reasoning_effort=reasoning_effort,
+                )
+            from agentcore_metering.adapters.django.services import (
+                fallback_capabilities,
+            )
+
+            return run_plan(row, invoke, accepts=lambda actual: (
+                fallback_capabilities.accepts_decisions(
+                    actual, input, questions,
+                )
+            ))
         return DecisionTracker.call_with_config(
             provider=row.provider,
             config=row.config,
@@ -315,27 +349,41 @@ class DecisionTracker:
             questions=questions,
             state=state,
             config_uuid=str(row.uuid),
+            reasoning_effort=reasoning_effort,
         )
 
     @staticmethod
     def call_with_config(
-        *, provider, config, input, questions, state=None, config_uuid=None
+        *, provider, config, input, questions, state=None, config_uuid=None,
+        model_type="decision", reasoning_effort=None,
     ):
         """Call an unsaved config for admin validation, recording its usage."""
         if not isinstance(input, str) or not input.strip():
             raise ValueError("Decision input must be non-empty text.")
         validate_questions(questions)
-        params = decision_params(provider, config)
-        params.update(input=input, questions=questions)
+        if model_type == "decision":
+            params = decision_params(provider, config)
+            params.update(input=input, questions=questions)
+            request = _request_decisions
+        elif model_type == "llm":
+            params = chat_decision_params(
+                provider, config, input, questions, reasoning_effort,
+            )
+            request = request_chat_decisions
+        else:
+            raise ValueError("Incompatible model for a decision request.")
         state = dict(state or {})
         state["metadata"] = {
             **(state.get("metadata") or {}),
-            "model_type": "decision",
-            "endpoint": "decisions",
+            "model_type": model_type,
+            "endpoint": "decisions" if model_type == "decision" else "chat",
             "question_count": len(questions),
         }
         if config_uuid:
             state["metadata"]["config_uuid"] = config_uuid
+        context = current_attempt.get()
+        if context is not None:
+            state["metadata"].update(context.prepare(params))
         started_at = timezone.now()
         # Use the shared persistence path without changing the chat tracker.
         from agentcore_metering.adapters.django.trackers.llm import LLMTracker
@@ -359,7 +407,7 @@ class DecisionTracker:
         usage = None
         try:
             payload, raw_cost = completion_with_retry(
-                _request_decisions, params, on_attempt_error=save_failure
+                request, params, on_attempt_error=save_failure
             )
             response_model = (
                 payload.get("model") if isinstance(payload, dict) else None
@@ -370,7 +418,11 @@ class DecisionTracker:
             )
             cost = _response_cost(raw_cost)
             usage["cost"] = float(cost) if cost is not None else None
+            if isinstance(payload, dict) and payload.get("_empty"):
+                raise EmptyResponseError("The chat model returned no answer.")
             _validate_answers(payload, questions)
+            if model_type == "llm":
+                validate_chat_probabilities(payload, questions)
         except Exception as exc:
             if usage is None:
                 save_failure(exc)

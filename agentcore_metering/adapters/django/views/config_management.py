@@ -265,7 +265,10 @@ class AdminLLMConfigDetailView(APIView):
             obj.is_default = data["is_default"]
             if obj.is_default:
                 set_default_llm_config(obj)
-        obj.save()
+        obj.save(update_fields=[
+            "provider", "config", "model_type", "is_active", "is_default",
+            "updated_at",
+        ])
         ctx = {"default_config_uuid": get_default_llm_config_uuid()}
         return Response(LLMConfigSerializer(obj, context=ctx).data)
 
@@ -450,7 +453,9 @@ class AdminLLMConfigUserDetailView(APIView):
             )
             if "is_active" in data:
                 obj.is_active = data["is_active"]
-            obj.save()
+            obj.save(update_fields=[
+                "provider", "config", "is_active", "updated_at",
+            ])
         ctx = {"default_config_uuid": get_default_llm_config_uuid()}
         return Response(LLMConfigSerializer(obj, context=ctx).data)
 

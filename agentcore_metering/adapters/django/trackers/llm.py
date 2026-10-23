@@ -29,6 +29,14 @@ from agentcore_metering.adapters.django.services.litellm_retry import (
     completion_with_retry,
     iter_completion_with_retry,
 )
+from agentcore_metering.adapters.django.services.fallback_runtime import (
+    current_attempt,
+    dispatch_chat,
+    is_fallback_attempt,
+)
+from agentcore_metering.adapters.django.services.model_fallback import (
+    EmptyResponseError,
+)
 from agentcore_metering.adapters.django.trackers.llm_usage import (
     fill_usage_with_token_fallback,
     usage_from_response,
@@ -102,27 +110,35 @@ def _record_failed_llm_call(
     error_msg: str,
 ) -> None:
     """Record a failed LLM call into state and DB. Does not raise."""
+    metadata = effective_state.get("metadata") or {}
+    model = (
+        metadata.get("actual_model") if metadata.get("fallback_call_id")
+        else None
+    ) or "unknown"
+    if is_streaming and metadata.get("fallback_call_id"):
+        metadata["usage_may_be_incomplete"] = True
+    billed = effective_state.get("_fallback_billed_usage") or {}
     if state is not None:
         state.setdefault("llm_calls", []).append(
             {
                 "node": node_name,
-                "model": "unknown",
-                "prompt_tokens": 0,
-                "completion_tokens": 0,
-                "total_tokens": 0,
+                "model": model,
+                "prompt_tokens": billed.get("prompt_tokens", 0),
+                "completion_tokens": billed.get("completion_tokens", 0),
+                "total_tokens": billed.get("total_tokens", 0),
                 "success": False,
                 "error": error_msg,
             }
         )
     LLMTracker._save_usage_to_db(
         state=effective_state,
-        model="unknown",
-        prompt_tokens=0,
-        completion_tokens=0,
-        total_tokens=0,
-        cached_tokens=0,
-        reasoning_tokens=0,
-        cost=None,
+        model=model,
+        prompt_tokens=billed.get("prompt_tokens", 0),
+        completion_tokens=billed.get("completion_tokens", 0),
+        total_tokens=billed.get("total_tokens", 0),
+        cached_tokens=billed.get("cached_tokens", 0),
+        reasoning_tokens=billed.get("reasoning_tokens", 0),
+        cost=billed.get("cost"),
         cost_currency=DEFAULT_COST_CURRENCY,
         success=False,
         error=error_msg,
@@ -291,6 +307,21 @@ class LLMTracker:
         params = get_litellm_params(
             user_id=user_id, model_uuid=model_uuid, strict_user_scope=strict_user_scope
         )
+        attempt_context = current_attempt.get()
+        root = getattr(params, "model_config", None)
+        if attempt_context is None and root is not None and root.fallback:
+            return dispatch_chat(root, LLMTracker.call_and_track, {
+                "messages": messages, "json_mode": json_mode,
+                "max_tokens": max_tokens, "temperature": temperature,
+                "top_p": top_p, "reasoning_effort": reasoning_effort,
+                "response_format": response_format, "node_name": node_name,
+                "state": state, "model_uuid": model_uuid, "stream": stream,
+                "json_repair": json_repair, "json_attempts": json_attempts,
+                "tools": tools, "tool_choice": tool_choice,
+                "return_message": return_message,
+                "strict_user_scope": strict_user_scope,
+                "friendly_errors": friendly_errors,
+            })
         model = params.get("model", "unknown")
 
         if max_tokens is not None:
@@ -322,6 +353,13 @@ class LLMTracker:
             **(state or {}),
             "node_name": (state_node if state_node else node_name),
         }
+        if attempt_context is not None:
+            effective_state["metadata"] = {
+                **(effective_state.get("metadata") or {}),
+                **attempt_context.prepare(params),
+            }
+            if attempt_context.timeout is not None:
+                json_attempts = 1
         litellm_metadata = effective_state.get("litellm_metadata")
         if isinstance(litellm_metadata, dict) and litellm_metadata:
             existing_metadata = params.get("metadata")
@@ -480,21 +518,42 @@ class LLMTracker:
                 params,
                 on_attempt_error=_record_retried_attempt,
             )
+            if is_fallback_attempt() and response is not None:
+                effective_state["_fallback_billed_usage"] = (
+                    usage_from_response(response, model)
+                )
 
             if response is None:
                 logger.error(f"LiteLLM returned None; node_name={node_name}")
-                raise ValueError(
+                error_type = (
+                    EmptyResponseError if is_fallback_attempt() else ValueError
+                )
+                raise error_type(
                     f"[{node_name}] LLM service returned None response"
                 )
 
             choice = (response.choices or [None])[0]
             if not choice or not getattr(choice, "message", None):
-                raise ValueError(
+                error_type = (
+                    EmptyResponseError if is_fallback_attempt() else ValueError
+                )
+                raise error_type(
                     f"LLM returned empty response "
                     f"(no message in choice; node_name={node_name} "
                     f"model={model})"
                 )
             msg = choice.message
+            if is_fallback_attempt() and getattr(
+                choice, "finish_reason", None,
+            ) == "length":
+                raise ValueError("Model response was truncated.")
+            if is_fallback_attempt() and (
+                getattr(msg, "refusal", None)
+                or getattr(choice, "finish_reason", None) == "content_filter"
+            ):
+                raise ValueError(
+                    "[model_refusal] Model refused to process this content."
+                )
             content = getattr(msg, "content", None) or ""
             tool_calls = _extract_tool_calls(msg)
             if not (content and str(content).strip()) and not tool_calls:
@@ -588,7 +647,12 @@ class LLMTracker:
                             :EMPTY_RESPONSE_REASONING_CAPTURE_CHARS
                         ],
                     }
-                    raise ValueError(
+                    error_type = (
+                        EmptyResponseError
+                        if is_fallback_attempt() and finish_reason != "length"
+                        else ValueError
+                    )
+                    raise error_type(
                         f"LLM returned empty response ({diagnostics})"
                     )
 
@@ -773,7 +837,7 @@ class LLMTracker:
                 metadata.update(extra)
 
             with transaction.atomic():
-                LLMUsage.objects.create(
+                usage_record = LLMUsage.objects.create(
                     user_id=user_id,
                     model=model,
                     prompt_tokens=prompt_tokens,
@@ -790,6 +854,11 @@ class LLMTracker:
                     is_streaming=is_streaming,
                     first_chunk_at=first_chunk_at,
                 )
+            context = current_attempt.get()
+            if context is not None and metadata.get("fallback_call_id"):
+                context.usage_id = usage_record.pk
+                context.usage_metadata = dict(metadata)
+                context.usage_success = success
         except Exception as e:
             logger.warning(
                 f"Failed to save LLM usage; node_name={node_name}, "
@@ -1062,6 +1131,16 @@ class LLMTracker:
                         )
                         logged_unknown_shape = True
                     continue
+                if (effective_state.get("metadata") or {}).get(
+                    "fallback_call_id",
+                ) and (
+                    finish_reason == "content_filter"
+                    or _read_chunk_field(delta, "refusal")
+                ):
+                    raise ValueError(
+                        "[model_refusal] Model refused to process this "
+                        "content."
+                    )
                 reasoning_raw = _read_chunk_field(
                     delta, "reasoning_content"
                 ) or _read_chunk_field(delta, "reasoning")
@@ -1138,6 +1217,16 @@ class LLMTracker:
                 if last_chunk
                 else _default_usage_dict(model)
             )
+            if (effective_state.get("metadata") or {}).get(
+                "fallback_call_id",
+            ):
+                effective_state["_fallback_billed_usage"] = usage
+                if finish_reason in ("content_filter", "length"):
+                    raise ValueError("Model stream was refused or truncated.")
+                if not streamed_content and not accumulated_tool_calls:
+                    raise EmptyResponseError(
+                        "Model stream returned no answer.",
+                    )
             usage = fill_usage_with_token_fallback(
                 usage,
                 model,
