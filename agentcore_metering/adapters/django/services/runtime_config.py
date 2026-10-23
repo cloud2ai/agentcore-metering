@@ -446,12 +446,17 @@ def run_test_call(
         state["user_id"] = getattr(user, "pk", None)
 
     try:
-        content, usage = LLMTracker.call_and_track(
-            messages=messages,
-            max_tokens=max_tokens,
-            state=state,
-            model_uuid=config_uuid_value,
+        from agentcore_metering.adapters.django.services import (
+            fallback_runtime,
         )
+
+        with fallback_runtime.primary_only():
+            content, usage = LLMTracker.call_and_track(
+                messages=messages,
+                max_tokens=max_tokens,
+                state=state,
+                model_uuid=config_uuid_value,
+            )
     except ValueError as e:
         msg = str(e).strip().lower()
         if "empty response" in msg or "no response" in msg:
@@ -532,13 +537,18 @@ def run_test_call_stream(
     if user is not None:
         state["user_id"] = getattr(user, "pk", None)
 
-    gen = LLMTracker.call_and_track(
-        messages=messages,
-        max_tokens=max_tokens,
-        state=state,
-        model_uuid=config_uuid_value,
-        stream=True,
+    from agentcore_metering.adapters.django.services.fallback_runtime import (
+        primary_only,
     )
+
+    with primary_only():
+        gen = LLMTracker.call_and_track(
+            messages=messages,
+            max_tokens=max_tokens,
+            state=state,
+            model_uuid=config_uuid_value,
+            stream=True,
+        )
     usage = None
     chunk_count = 0
     try:
@@ -579,6 +589,14 @@ def run_test_call_stream(
     return usage_dict
 
 
+class ModelCallParams(dict):
+    """SDK kwargs with local metadata that never enters the provider body."""
+
+    def __init__(self, params, model_config=None):
+        super().__init__(params)
+        self.model_config = model_config
+
+
 def get_litellm_params(
     user_id: Optional[int] = None,
     model_uuid: Optional[str] = None,
@@ -611,7 +629,10 @@ def get_litellm_params(
         provider = cfg["provider"]
         config = cfg["config"] or {}
         _validate_config(provider, config)
-        return _litellm_kwargs_from_config(provider, config)
+        return ModelCallParams(
+            _litellm_kwargs_from_config(provider, config),
+            getattr(cfg, "model_config", None),
+        )
 
     if model_uuid is not None:
         raise ValueError(

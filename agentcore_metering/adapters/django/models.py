@@ -276,6 +276,12 @@ class LLMConfig(models.Model):
         blank=True,
         help_text="Provider-specific config (api_key, model, api_base, etc.).",
     )
+    fallback = models.JSONField(
+        null=True,
+        blank=True,
+        default=None,
+        help_text="Ordered backup models and bounded failover policy.",
+    )
     is_active = models.BooleanField(
         default=True,
         db_index=True,

@@ -251,3 +251,39 @@ def test_sdk_retry_budget(chat_endpoint, prompt, count, success):
     assert len(chat_endpoint) == count
     assert LLMUsage.objects.count() == count
     assert LLMUsage.objects.filter(success=True).exists() is success
+
+
+def test_real_chat_transport_switches_after_one_429(chat_endpoint):
+    """Exercise the pinned SDK over HTTP, including retry suppression."""
+    from agentcore_metering.adapters.django.services.fallback_config import (
+        save_policy,
+    )
+
+    from agentcore_metering.adapters.django.services.runtime_config import (
+        get_litellm_params as resolve_params,
+    )
+    from agentcore_metering.adapters.django.trackers import llm
+    api_base = llm.get_litellm_params()["api_base"]
+    requests = chat_endpoint
+    rows = [LLMConfig.objects.create(
+        scope="global", provider="openai_compatible",
+        config={"model": name, "api_base": api_base,
+                "api_key": "test-only-key", "num_retries": 4},
+    ) for name in ("primary-chat", "backup-chat")]
+    primary = save_policy(rows[0], {"model_uuids": [str(rows[1].uuid)]})
+    with patch(
+        "agentcore_metering.adapters.django.trackers.llm.get_litellm_params",
+        side_effect=resolve_params,
+    ):
+        content, usage = LLMTracker.call_and_track(
+            model_uuid=str(primary.uuid),
+            messages=[{"role": "user", "content": "retry"}],
+        )
+    assert content == "ok"
+    assert [body["model"] for body in requests] == [
+        "primary-chat", "backup-chat",
+    ]
+    assert usage["total_tokens"] == 26
+    attempts = list(LLMUsage.objects.order_by("created_at"))
+    assert [row.success for row in attempts] == [False, True]
+    assert attempts[-1].metadata["fallback_reason"] == "rate_limit"

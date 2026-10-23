@@ -12,6 +12,9 @@ from agentcore_metering.adapters.django.services.decisions import (
     DecisionTracker,
     decision_error_detail,
 )
+from agentcore_metering.adapters.django.services.fallback_runtime import (
+    primary_only,
+)
 from agentcore_metering.adapters.django.services.config_access import (
     user_model_configs,
 )
@@ -44,9 +47,10 @@ class AdminDecisionTestView(APIView):
         }
         try:
             if data.get("config_uuid"):
-                answers, usage = DecisionTracker.call_and_track(
-                    model_uuid=data["config_uuid"], **params
-                )
+                with primary_only():
+                    answers, usage = DecisionTracker.call_and_track(
+                        model_uuid=data["config_uuid"], **params
+                    )
             else:
                 answers, usage = DecisionTracker.call_with_config(
                     provider=data["provider"], config=data["config"], **params

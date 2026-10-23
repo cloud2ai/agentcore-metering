@@ -536,12 +536,25 @@ def test_native_region_restriction_is_explained_in_config_test(
         ('openai', 'gpt-6-luna', 'https://api.openai.com/v1', '/decisions'),
     ],
 )
-def test_native_provider_wire_and_metering(provider, model, base, path):
+def test_native_provider_wire_and_metering(
+    provider, model, base, path, monkeypatch,
+):
     """Exercise real LiteLLM translation, mocking only its outbound HTTP."""
     config = {
         'model': model, 'api_key': 'native-test-key',
         'api_base': base, 'account_id': 'a' * 32, 'num_retries': 0,
     }
+    # Pricing is test data: LiteLLM's remotely refreshed registry must not
+    # decide whether a fixed wire-contract fixture passes.
+    if provider == 'openrouter':
+        import litellm
+        monkeypatch.setitem(
+            litellm.model_cost, 'openrouter/typesafe/jev-1.13', {
+                'input_cost_per_token': 0.000001,
+                'output_cost_per_token': 0,
+                'litellm_provider': 'openrouter', 'mode': 'decision',
+            },
+        )
     calls = []
 
     def post(url, *, json, headers, **kwargs):
