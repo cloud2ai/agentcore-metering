@@ -71,21 +71,23 @@ def test_admin_read_write_and_clear_preserve_credentials(admin_client, models):
     assert root.fallback is None
 
 
-def test_user_can_select_own_and_readable_global_models(
+def test_user_can_select_own_backup(
     authenticated_client,
     models,
 ):
     root = models["personal"]
     reply = authenticated_client.put(
         f"{USER_BASE}{root.uuid}/fallback",
-        {"fallback": settings(models["own_backup"], models["global"])},
+        {"fallback": settings(models["own_backup"])},
         format="json",
     )
     assert reply.status_code == 200
-    assert len(reply.data["backups"]) == 2
+    assert len(reply.data["backups"]) == 1
 
 
-@pytest.mark.parametrize("target", ["foreign", "inactive", "decision"])
+@pytest.mark.parametrize(
+    "target", ["global", "foreign", "inactive", "decision"],
+)
 def test_bad_backup_cannot_be_saved_by_user(
     authenticated_client,
     models,
@@ -142,12 +144,12 @@ def test_self_reference_and_indirect_cycle_rejected(models):
 
 
 @pytest.mark.parametrize("base", [BASE, USER_BASE])
-def test_identical_personal_and_global_destination_is_not_a_backup(
+def test_identical_personal_destination_is_not_a_backup(
     request,
     models,
     base,
 ):
-    root, duplicate = models["personal"], models["global"]
+    root, duplicate = models["personal"], models["own_backup"]
     duplicate.config = {
         **root.config,
         "api_base": root.config["api_base"] + "/",
@@ -164,7 +166,6 @@ def test_identical_personal_and_global_destination_is_not_a_backup(
     candidates = {item["uuid"] for item in reply.data["candidates"]}
     assert str(root.uuid) not in candidates
     assert str(duplicate.uuid) not in candidates
-    assert str(models["own_backup"].uuid) in candidates
     reply = client.put(url, {"fallback": settings(duplicate)}, format="json")
     assert reply.status_code == 400
     assert "private-key" not in str(reply.data)
@@ -172,9 +173,109 @@ def test_identical_personal_and_global_destination_is_not_a_backup(
     assert root.fallback is None
 
 
+@pytest.mark.parametrize(
+    "base, root_key, expected",
+    [
+        (BASE, "global", {"backup"}),
+        (BASE, "personal", {"own_backup"}),
+        (BASE, "foreign", set()),
+        (USER_BASE, "personal", {"own_backup"}),
+    ],
+)
+def test_candidates_follow_model_owner_not_viewer(
+    request, models, base, root_key, expected,
+):
+    client = request.getfixturevalue(
+        "admin_client" if base == BASE else "authenticated_client"
+    )
+    reply = client.get(f"{base}{models[root_key].uuid}/fallback")
+    assert reply.status_code == 200
+    assert {row["uuid"] for row in reply.data["candidates"]} == {
+        str(models[key].uuid) for key in expected
+    }
+
+
+@pytest.mark.parametrize(
+    "root_key, target_key",
+    [("global", "personal"), ("personal", "global"),
+     ("personal", "foreign")],
+)
+def test_admin_cannot_bypass_local_backup_scope(
+    admin_client, models, root_key, target_key,
+):
+    root = models[root_key]
+    reply = admin_client.put(
+        f"{BASE}{root.uuid}/fallback",
+        {"fallback": settings(models[target_key])}, format="json",
+    )
+    assert reply.status_code == 400
+    assert "scope" in reply.data["detail"]
+    root.refresh_from_db()
+    assert root.fallback is None
+
+
+def test_legacy_mixed_policy_remains_readable_until_reconfigured(
+    authenticated_client, models,
+):
+    root, backup = models["personal"], models["global"]
+    # Older releases allowed this direct edge. Do not rewrite stored policy
+    # or silently change running calls during a configuration-only fix.
+    LLMConfig.objects.filter(pk=root.pk).update(fallback=settings(backup))
+    root.refresh_from_db()
+    assert [row.pk for row in resolve_plan(root)[2]] == [backup.pk]
+    url = f"{USER_BASE}{root.uuid}/fallback"
+    reply = authenticated_client.get(url)
+    assert reply.status_code == 200
+    assert reply.data["backups"][0]["uuid"] == str(backup.uuid)
+    assert str(backup.uuid) not in {
+        row["uuid"] for row in reply.data["candidates"]
+    }
+    reply = authenticated_client.put(
+        url, {"fallback": settings(backup)}, format="json",
+    )
+    assert reply.status_code == 400
+    reply = authenticated_client.put(
+        url, {"fallback": settings(models["own_backup"])}, format="json",
+    )
+    assert reply.status_code == 200
+    assert reply.data["backups"][0]["uuid"] == str(models["own_backup"].uuid)
+
+
+@pytest.mark.parametrize("base", [BASE, USER_BASE])
+def test_explicit_inheritance_is_separate_from_local_candidates(
+    request, models, base,
+):
+    global_root, backup = models["global"], models["backup"]
+    global_root.is_default = True
+    global_root.save(update_fields=["is_default"])
+    save_policy(global_root, settings(backup))
+    client = request.getfixturevalue(
+        "admin_client" if base == BASE else "authenticated_client"
+    )
+    reply = client.put(
+        f"{base}{models['personal'].uuid}/fallback",
+        {"fallback": {"inherit_global": True}}, format="json",
+    )
+    assert reply.status_code == 200
+    assert reply.data["inherited_from"] == str(global_root.uuid)
+    assert reply.data["backups"][0]["uuid"] == str(backup.uuid)
+    assert {row["uuid"] for row in reply.data["candidates"]} == {
+        str(models["own_backup"].uuid),
+    }
+
+
+def test_own_backup_can_explicitly_inherit_global_policy(models):
+    save_policy(models["global"], settings(models["backup"]))
+    save_policy(models["own_backup"], {"inherit_global": True})
+    root = save_policy(models["personal"], settings(models["own_backup"]))
+    assert [row.pk for row in resolve_plan(root)[2]] == [
+        models["own_backup"].pk,
+    ]
+
+
 @pytest.mark.parametrize("field", ["api_key", "api_base", "model"])
 def test_same_name_with_distinct_route_can_be_a_backup(models, field):
-    root, target = models["personal"], models["global"]
+    root, target = models["personal"], models["own_backup"]
     target.config = {**root.config, field: "different-value"}
     target.save(update_fields=["config"])
     root = save_policy(root, settings(target))
@@ -182,7 +283,7 @@ def test_same_name_with_distinct_route_can_be_a_backup(models, field):
 
 
 def test_later_credential_edit_cannot_make_primary_its_own_backup(models):
-    root, target = models["personal"], models["global"]
+    root, target = models["personal"], models["own_backup"]
     root = save_policy(root, settings(target))
     target.config = root.config.copy()
     target.save(update_fields=["config"])
@@ -191,10 +292,12 @@ def test_later_credential_edit_cannot_make_primary_its_own_backup(models):
 
 def test_deleted_or_disabled_backup_is_never_resolved(models):
     root, first, second = (
-        models["personal"],
-        models["own_backup"],
+        models["global"],
+        models["inactive"],
         models["backup"],
     )
+    first.is_active = True
+    first.save(update_fields=["is_active"])
     save_policy(root, settings(first, second))
     first.delete()
     second.is_active = False

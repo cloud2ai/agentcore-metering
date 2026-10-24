@@ -124,6 +124,11 @@ def visible_graph(root):
     return LLMConfig.objects.filter(scopes)
 
 
+def same_scope(root, target):
+    """Local backups belong to the primary model's scope and owner."""
+    return root.scope == target.scope and root.user_id == target.user_id
+
+
 def compatible(root, target):
     allowed = {
         LLMConfig.MODEL_TYPE_LLM: {LLMConfig.MODEL_TYPE_LLM},
@@ -185,18 +190,15 @@ def _validate_graph(root, rows):
         if len(visited) >= 256:
             raise ValueError("The fallback graph is too large.")
         visited.add(identity)
-        policy, _ = effective_policy(row, rows, strict=True)
+        policy, origin = effective_policy(row, rows, strict=True)
         for target_id in (policy or {}).get("model_uuids", []):
             target = rows.get(target_id)
             if target is None or not target.is_active:
                 raise ValueError(
                     "A backup is unavailable or outside the model's scope."
                 )
-            # Scope is checked per edge, including existing relationships.
-            if target.scope == LLMConfig.Scope.USER and (
-                row.scope != LLMConfig.Scope.USER
-                or row.user_id != target.user_id
-            ):
+            # Inherited edges belong to the global policy's owner.
+            if not same_scope(origin, target):
                 raise ValueError("A backup is outside the model's scope.")
             if not compatible(row, target):
                 raise ValueError("A backup model has incompatible abilities.")

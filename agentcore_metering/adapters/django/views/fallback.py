@@ -20,6 +20,7 @@ from agentcore_metering.adapters.django.services.fallback_config import (
     inherited_origin,
     normalize_policy,
     resolve_plan,
+    same_scope,
     same_upstream,
     save_policy,
     visible_graph,
@@ -72,6 +73,7 @@ def policy_representation(row):
             for item in available
             if (
                 item.pk != row.pk
+                and same_scope(row, item)
                 and compatible(row, item)
                 and not same_upstream(row, item)
             )
