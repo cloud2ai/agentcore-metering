@@ -4,6 +4,7 @@ Callers own parameter adaptation and one usage record per provider attempt.
 This module does not persist usage or replay emitted responses.
 """
 
+import json
 import math
 import time
 from dataclasses import dataclass
@@ -54,6 +55,36 @@ _POLICY_MARKERS = (
 )
 
 
+def _error_body_text(body, depth=0):
+    """Read known error envelopes only, with bounded depth and field sizes."""
+    if depth > 4:
+        return []
+    if isinstance(body, str):
+        text = body[:4096]
+        try:
+            body = json.loads(text)
+        except (ValueError, RecursionError):
+            return [text]
+    if not isinstance(body, dict):
+        return []
+    parts = [
+        value[:1024]
+        for key in ("code", "type", "message")
+        if isinstance(value := body.get(key), str)
+    ]
+    if any(
+        isinstance(value := body.get(key), str)
+        and value[:1024].lower() in (
+            "insufficient_balance", "insufficient_balance_error",
+        )
+        for key in ("code", "type")
+    ):
+        parts.append("insufficient balance")
+    for key in ("error", "providerError", "body"):
+        parts.extend(_error_body_text(body.get(key), depth + 1))
+    return parts
+
+
 def _error_text(exc):
     """Inspect bounded error fields locally; never copy them to metadata."""
     parts = [str(exc)[:4096]]
@@ -71,13 +102,17 @@ def _error_text(exc):
             )
     elif isinstance(body, str):
         parts.append(body[:4096])
+    # Add nested fields without removing legacy raw/shallow policy signals.
+    parts.extend(_error_body_text(body))
     # HTTPX status errors keep gateway error details on the response,
     # not on exc.body. A 400/5xx wrapper must not hide exhausted quota.
     response = getattr(exc, "response", None)
     try:
         content = getattr(response, "content", None)
         if isinstance(content, bytes):
-            parts.append(content[:4096].decode("utf-8", errors="replace"))
+            text = content[:4096].decode("utf-8", errors="replace")
+            parts.append(text)
+            parts.extend(_error_body_text(text))
     except (httpx.ResponseNotRead, RuntimeError):
         pass
     for key in ("code", "type"):
