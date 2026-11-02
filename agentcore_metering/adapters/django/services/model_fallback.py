@@ -41,7 +41,6 @@ _QUOTA_MARKERS = (
     "quota_exceeded",
     "quota exhausted",
     "insufficient balance",
-    "insufficient_balance",
     "insufficient credits",
     "credit balance",
     "billing_hard_limit_reached",
@@ -73,6 +72,14 @@ def _error_body_text(body, depth=0):
         for key in ("code", "type", "message")
         if isinstance(value := body.get(key), str)
     ]
+    if any(
+        isinstance(value := body.get(key), str)
+        and value[:1024].lower() in (
+            "insufficient_balance", "insufficient_balance_error",
+        )
+        for key in ("code", "type")
+    ):
+        parts.append("insufficient balance")
     for key in ("error", "providerError", "body"):
         parts.extend(_error_body_text(body.get(key), depth + 1))
     return parts
@@ -81,16 +88,31 @@ def _error_body_text(body, depth=0):
 def _error_text(exc):
     """Inspect bounded error fields locally; never copy them to metadata."""
     parts = [str(exc)[:4096]]
-    parts.extend(_error_body_text(getattr(exc, "body", None)))
+    body = getattr(exc, "body", None)
+    if isinstance(body, dict):
+        error = body.get("error", body)
+        if isinstance(error, dict):
+            parts.extend(
+                str(error.get(key, ""))[:1024]
+                for key in (
+                    "code",
+                    "type",
+                    "message",
+                )
+            )
+    elif isinstance(body, str):
+        parts.append(body[:4096])
+    # Add nested fields without removing legacy raw/shallow policy signals.
+    parts.extend(_error_body_text(body))
     # HTTPX status errors keep gateway error details on the response,
     # not on exc.body. A 400/5xx wrapper must not hide exhausted quota.
     response = getattr(exc, "response", None)
     try:
         content = getattr(response, "content", None)
         if isinstance(content, bytes):
-            parts.extend(_error_body_text(
-                content[:4096].decode("utf-8", errors="replace"),
-            ))
+            text = content[:4096].decode("utf-8", errors="replace")
+            parts.append(text)
+            parts.extend(_error_body_text(text))
     except (httpx.ResponseNotRead, RuntimeError):
         pass
     for key in ("code", "type"):

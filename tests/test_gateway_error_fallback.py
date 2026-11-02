@@ -75,6 +75,17 @@ def test_gateway_response_body_without_sdk_body_is_recognized():
     assert fallback_reason(error) == "quota_exhausted"
 
 
+def test_response_only_quota_code_without_a_human_message_is_recognized():
+    request = httpx.Request("POST", "https://gateway.invalid/completions")
+    response = httpx.Response(502, request=request, json=gateway_body(
+        code="insufficient_balance", message="Unavailable",
+    ))
+    error = httpx.HTTPStatusError(
+        "Unavailable", request=request, response=response,
+    )
+    assert fallback_reason(error) == "quota_exhausted"
+
+
 @pytest.mark.parametrize("code", ["content_policy_violation", "model_refusal"])
 def test_nested_refusal_still_wins_over_quota(code):
     body = gateway_body(code=code)
